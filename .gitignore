@@ -1,0 +1,21 @@
+# Go outputs
+mekiki
+*.exe
+*.test
+*.out
+coverage.*
+*.coverprofile
+go.work
+go.work.sum
+
+# Local files
+.env
+.env.*
+*.log
+*.key
+*.pem
+*.swp
+*.tmp
+.idea/
+.vscode/
+dist/
