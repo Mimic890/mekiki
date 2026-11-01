@@ -23,7 +23,8 @@ type gpuStatus struct {
 }
 
 // doctor reports every external tool and test-encodes every GPU preset.
-// It exits 4 if any tool is missing; GPU results do not affect the exit code.
+// It exits 4 if ffprobe or ffmpeg is missing; optional tools and GPU results
+// do not affect the exit code.
 func (a *app) doctor(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	args, err := a.parseFlags(fs, args, "doctor [--json]")
@@ -39,7 +40,7 @@ func (a *app) doctor(ctx context.Context, args []string) error {
 	for _, name := range tools.Known {
 		st := tools.Check(ctx, name)
 		doc.Tools = append(doc.Tools, st)
-		if !st.Found {
+		if !st.Found && (name == "ffprobe" || name == "ffmpeg") {
 			missing = append(missing, name)
 		}
 	}

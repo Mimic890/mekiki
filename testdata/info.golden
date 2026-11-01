@@ -54,6 +54,7 @@
           "channels": 6,
           "channelLayout": "5.1(side)",
           "sampleRate": 48000,
+          "bitDepth": 0,
           "bitrateBps": 0,
           "sizeBytes": 0,
           "language": "eng",

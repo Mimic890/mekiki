@@ -82,6 +82,9 @@ func infoLines(st *fileState) []string {
 		if a.SampleRate > 0 {
 			rate = fmt.Sprintf("%.4g kHz", float64(a.SampleRate)/1000)
 		}
+		if a.BitDepth > 0 {
+			rate += fmt.Sprintf(" %d-bit", a.BitDepth)
+		}
 		extra := ""
 		if a.IsAtmos {
 			extra = "Atmos"

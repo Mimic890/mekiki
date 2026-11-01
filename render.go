@@ -494,7 +494,7 @@ func printFileCard(w io.Writer, info *probe.MediaInfo, tw int, num int) {
 		line(anGreen + anBold + "AUDIO" + anReset)
 		var cards []trackCard
 		for _, a := range info.Audio {
-			cards = append(cards, makeAudioCard(a))
+			cards = append(cards, makeAudioCard(a, len(info.Audio) == 1))
 		}
 		for _, l := range trackCardRowLines(cards, contentW) {
 			line(l)
@@ -611,7 +611,7 @@ func printFileInfo(w io.Writer, info *probe.MediaInfo) {
 		fmt.Fprintf(w, "  %s%sAUDIO%s\n", anGreen, anBold, anReset)
 		var cards []trackCard
 		for _, a := range info.Audio {
-			cards = append(cards, makeAudioCard(a))
+			cards = append(cards, makeAudioCard(a, len(info.Audio) == 1))
 		}
 		printTrackCards(w, cards, tw)
 	}
@@ -856,17 +856,22 @@ func printTrackCards(w io.Writer, cards []trackCard, tw int) {
 	fmt.Fprintln(w)
 }
 
-// makeAudioCard builds a trackCard for one audio stream.
-func makeAudioCard(a probe.AudioStream) trackCard {
-	parts := []string{
-		probeLangTag(a.Language),
-		anTeal + anBold + codecLabel(a.Codec) + anReset,
+// makeAudioCard builds a trackCard for one audio stream. A lone track
+// without a language gets no [?] tag: there is nothing to tell apart.
+func makeAudioCard(a probe.AudioStream, only bool) trackCard {
+	var parts []string
+	if !only || a.Language != "" && a.Language != "und" {
+		parts = append(parts, probeLangTag(a.Language))
 	}
+	parts = append(parts, anTeal+anBold+codecLabel(a.Codec)+anReset)
 	if ch := chanStr(a.Channels, a.ChannelLayout); ch != "" {
 		parts = append(parts, anWhite+ch+anReset)
 	}
 	if a.SampleRate > 0 {
 		parts = append(parts, anYellow+fmt.Sprintf("%.4g kHz", float64(a.SampleRate)/1000)+anReset)
+	}
+	if a.BitDepth > 0 {
+		parts = append(parts, anYellow+fmt.Sprintf("%d-bit", a.BitDepth)+anReset)
 	}
 	if a.BitrateBps > 0 {
 		parts = append(parts, anGray+fmtKbps(a.BitrateBps)+anReset)

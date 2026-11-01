@@ -98,6 +98,7 @@ type AudioStream struct {
 	Channels      int               `json:"channels"`
 	ChannelLayout string            `json:"channelLayout"`
 	SampleRate    int               `json:"sampleRate"`
+	BitDepth      int               `json:"bitDepth"`
 	BitrateBps    int64             `json:"bitrateBps"`
 	SizeBytes     int64             `json:"sizeBytes"`
 	Language      string            `json:"language"`
@@ -209,14 +210,23 @@ func parseFFprobe(path string, fileSize int64, out []byte) (*MediaInfo, error) {
 		info.BitrateBps = br
 	}
 
+	// ffmpeg copies mkvmerge's per-track statistics tags (BPS, NUMBER_OF_BYTES) without
+	// recomputing them, so in files it wrote they describe the source tracks.
+	stats := true
+	for k, v := range info.Tags {
+		if strings.EqualFold(k, "encoder") && strings.HasPrefix(v, "Lavf") {
+			stats = false
+		}
+	}
+
 	for _, s := range raw.Streams {
 		switch s.CodecType {
 		case "video":
-			info.Video = append(info.Video, parseVideoStream(s))
+			info.Video = append(info.Video, parseVideoStream(s, stats))
 		case "audio":
-			info.Audio = append(info.Audio, parseAudioStream(s))
+			info.Audio = append(info.Audio, parseAudioStream(s, stats))
 		case "subtitle":
-			info.Subtitle = append(info.Subtitle, parseSubStream(s))
+			info.Subtitle = append(info.Subtitle, parseSubStream(s, stats))
 		}
 	}
 
@@ -251,7 +261,7 @@ func IsMediaFile(name string) bool {
 
 // ── Stream parsers ────────────────────────────────────────────────────────────
 
-func parseVideoStream(s rawStream) VideoStream {
+func parseVideoStream(s rawStream, stats bool) VideoStream {
 	fps := parseFPS(s.AvgFrameRate)
 	if fps == 0 {
 		fps = parseFPS(s.RFrameRate)
@@ -277,7 +287,9 @@ func parseVideoStream(s rawStream) VideoStream {
 	if nf, err := strconv.ParseInt(s.NbFrames, 10, 64); err == nil && nf > 0 {
 		vs.NbFrames = nf
 	}
-	vs.SizeBytes = tagInt64Prefix(s.Tags, "NUMBER_OF_BYTES")
+	if stats {
+		vs.SizeBytes = tagInt64Prefix(s.Tags, "NUMBER_OF_BYTES")
+	}
 	// If ffprobe didn't report bit depth directly, infer it from the pixel format name.
 	if vs.BitDepth == 0 {
 		vs.BitDepth = bitDepthFromPixFmt(s.PixFmt)
@@ -288,7 +300,7 @@ func parseVideoStream(s rawStream) VideoStream {
 	return vs
 }
 
-func parseAudioStream(s rawStream) AudioStream {
+func parseAudioStream(s rawStream, stats bool) AudioStream {
 	as := AudioStream{
 		Index:         s.Index,
 		Codec:         s.CodecName,
@@ -297,6 +309,7 @@ func parseAudioStream(s rawStream) AudioStream {
 		Channels:      s.Channels,
 		ChannelLayout: s.ChannelLayout,
 		SampleRate:    parseIntStr(s.SampleRate),
+		BitDepth:      parseIntStr(s.BitsPerRawSample),
 		Language:      s.Tags["language"],
 		Title:         s.Tags["title"],
 	}
@@ -304,10 +317,16 @@ func parseAudioStream(s rawStream) AudioStream {
 		as.BitrateBps = br
 	}
 	// MKV containers often store per-track bitrate in tags instead of the stream header.
-	if as.BitrateBps == 0 {
+	if as.BitrateBps == 0 && stats {
 		as.BitrateBps = tagInt64Prefix(s.Tags, "BPS")
 	}
-	as.SizeBytes = tagInt64Prefix(s.Tags, "NUMBER_OF_BYTES")
+	if stats {
+		as.SizeBytes = tagInt64Prefix(s.Tags, "NUMBER_OF_BYTES")
+	}
+	// PCM reports its depth only in bits_per_sample; lossy codecs report neither.
+	if as.BitDepth == 0 {
+		as.BitDepth = s.BitsPerSample
+	}
 
 	// Dolby Atmos is embedded inside TrueHD or EAC-3 streams.
 	// ffprobe exposes it in the Profile field when it can detect it.
@@ -325,7 +344,7 @@ func parseAudioStream(s rawStream) AudioStream {
 	return as
 }
 
-func parseSubStream(s rawStream) SubStream {
+func parseSubStream(s rawStream, stats bool) SubStream {
 	ss := SubStream{
 		Index:    s.Index,
 		Codec:    s.CodecName,
@@ -333,8 +352,10 @@ func parseSubStream(s rawStream) SubStream {
 		Title:    s.Tags["title"],
 		Forced:   s.Disposition.Forced == 1,
 	}
-	ss.BitrateBps = tagInt64Prefix(s.Tags, "BPS")
-	ss.SizeBytes = tagInt64Prefix(s.Tags, "NUMBER_OF_BYTES")
+	if stats {
+		ss.BitrateBps = tagInt64Prefix(s.Tags, "BPS")
+		ss.SizeBytes = tagInt64Prefix(s.Tags, "NUMBER_OF_BYTES")
+	}
 	ss.Default, ss.Tags = s.Disposition.Default == 1, tagsOrEmpty(s.Tags)
 	return ss
 }
@@ -561,6 +582,7 @@ type rawStream struct {
 	BitRate          string            `json:"bit_rate"`
 	PixFmt           string            `json:"pix_fmt"`
 	BitsPerRawSample string            `json:"bits_per_raw_sample"`
+	BitsPerSample    int               `json:"bits_per_sample"`
 	ColorRange       string            `json:"color_range"`
 	ColorSpace       string            `json:"color_space"`
 	ColorTransfer    string            `json:"color_transfer"`

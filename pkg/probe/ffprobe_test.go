@@ -84,3 +84,27 @@ func TestScanFileRejectsDirectory(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestParseFFprobeStaleStats(t *testing.T) {
+	// An ffmpeg re-encode of an mkvmerge file: the Opus track kept the DTS track's statistics.
+	raw := []byte(`{
+		"format":{"tags":{"ENCODER":"Lavf63.1.101"}},
+		"streams":[
+			{"index":0,"codec_type":"audio","codec_name":"opus","tags":{"BPS":"2403521","NUMBER_OF_BYTES":"500"}},
+			{"index":1,"codec_type":"audio","codec_name":"ac3","bit_rate":"640000","bits_per_raw_sample":"24","tags":{"BPS":"1"}},
+			{"index":2,"codec_type":"audio","codec_name":"pcm_s16le","bits_per_sample":16},
+			{"index":3,"codec_type":"subtitle","codec_name":"subrip","tags":{"NUMBER_OF_BYTES":"100"}}
+		]
+	}`)
+	info, err := parseFFprobe("/tmp/demo.mkv", 1000, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := info.Audio
+	if a[0].BitrateBps != 0 || a[0].SizeBytes != 0 || info.Subtitle[0].SizeBytes != 0 {
+		t.Fatalf("stale statistics tags were used: %+v %+v", a[0], info.Subtitle[0])
+	}
+	if a[1].BitrateBps != 640000 || a[1].BitDepth != 24 || a[2].BitDepth != 16 || a[0].BitDepth != 0 {
+		t.Fatalf("unexpected bitrate or bit depth: %+v", a)
+	}
+}
