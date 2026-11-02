@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"syscall"
@@ -67,10 +68,19 @@ Commands:
   meta get|set|rm <file...>  Read or edit container, track and image tags
   doctor                     Check external tools, versions and GPU presets
   tui [dir]                  Open the terminal interface (needs a terminal)
+  version                    Print the version (also -v, --version)
 
 mekiki <path...> is shorthand for mekiki info <path...>.
 Run mekiki <command> -h for command flags.
 `
+
+// version reports the module version stamped by go install/build, "(devel)" for local builds.
+func version() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
+		return bi.Main.Version
+	}
+	return "(devel)"
+}
 
 type app struct {
 	stdout, stderr io.Writer
@@ -122,7 +132,7 @@ func (a *app) main(ctx context.Context, args []string) int {
 		line.Error.Code, line.Error.Message = exitNames[code], err.Error()
 		json.NewEncoder(a.stderr).Encode(line)
 	} else {
-		fmt.Fprintln(a.stderr, anRed+"✖ "+safeText(err.Error())+anReset)
+		fmt.Fprintln(a.stderr, anRed+safeText(err.Error())+anReset)
 	}
 	return code
 }
@@ -144,6 +154,9 @@ func (a *app) run(ctx context.Context, args []string) error {
 			return a.tui(ctx, args[1:])
 		case "help", "-h", "-help", "--help":
 			fmt.Fprint(a.stdout, usageText)
+			return nil
+		case "version", "-v", "-version", "--version":
+			fmt.Fprintln(a.stdout, "mekiki", version())
 			return nil
 		}
 	}
@@ -277,7 +290,7 @@ func (a *app) info(ctx context.Context, args []string) error {
 	report := func(e itemError) {
 		// A single failure is reported once, as the command error.
 		if !a.json && total > 1 {
-			fmt.Fprintf(a.stderr, "  %s✖ %s: %s%s\n", anRed, safeText(filepath.Base(e.Path)), safeText(e.Error), anReset)
+			fmt.Fprintf(a.stderr, "  %s%s: %s%s\n", anRed, safeText(filepath.Base(e.Path)), safeText(e.Error), anReset)
 		}
 	}
 	for _, e := range doc.Errors {

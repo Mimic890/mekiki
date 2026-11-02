@@ -282,7 +282,7 @@ func (v *progressView) handle(ev convert.Event) {
 	case "done":
 		delete(v.running, ev.JobID)
 		v.done++
-		fmt.Fprintf(v.w, "  %s✔%s %s → %s\n", anGreen, anReset, name, safeText(ev.Output))
+		fmt.Fprintf(v.w, "  %s%s%s → %s\n", anGreen, name, anReset, safeText(ev.Output))
 	case "failed", "canceled":
 		delete(v.running, ev.JobID)
 		v.failed++
@@ -292,7 +292,7 @@ func (v *progressView) handle(ev convert.Event) {
 			if ev.Type == "canceled" {
 				msg = "canceled"
 			}
-			fmt.Fprintf(v.w, "  %s✖ %s: %s%s\n", anRed, name, safeText(msg), anReset)
+			fmt.Fprintf(v.w, "  %s%s: %s%s\n", anRed, name, safeText(msg), anReset)
 		}
 	}
 	if !v.live || len(v.running) == 0 {

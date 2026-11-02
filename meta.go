@@ -91,7 +91,7 @@ func (a *app) metaGet(ctx context.Context, args []string) error {
 		if err != nil {
 			doc.Errors = append(doc.Errors, itemError{path, err.Error()})
 			if !a.json && len(paths) > 1 {
-				fmt.Fprintf(a.stderr, "  %s✖ %s: %s%s\n", anRed, safeText(path), safeText(err.Error()), anReset)
+				fmt.Fprintf(a.stderr, "  %s%s: %s%s\n", anRed, safeText(path), safeText(err.Error()), anReset)
 			}
 			continue
 		}
@@ -236,7 +236,7 @@ func (a *app) metaEdit(ctx context.Context, verb string, args []string) error {
 			}
 			doc.Errors = append(doc.Errors, itemError{path, err.Error()})
 			if !a.json && len(paths) > 1 {
-				fmt.Fprintf(a.stderr, "  %s✖ %s: %s%s\n", anRed, safeText(path), safeText(err.Error()), anReset)
+				fmt.Fprintf(a.stderr, "  %s%s: %s%s\n", anRed, safeText(path), safeText(err.Error()), anReset)
 			}
 			continue
 		}
@@ -246,7 +246,7 @@ func (a *app) metaEdit(ctx context.Context, verb string, args []string) error {
 		case *dryRun:
 			fmt.Fprintln(a.stdout, shellJoin(res.Command))
 		default:
-			fmt.Fprintf(a.stderr, "  %s✔%s %s → %s %s(%s)%s\n", anGreen, anReset, safeText(path), safeText(res.Output), anGray, res.Backend, anReset)
+			fmt.Fprintf(a.stderr, "  %s%s%s → %s %s(%s)%s\n", anGreen, safeText(path), anReset, safeText(res.Output), anGray, res.Backend, anReset)
 		}
 	}
 	if a.json {

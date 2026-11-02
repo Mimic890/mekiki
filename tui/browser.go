@@ -105,15 +105,13 @@ func (b browser) lines(w, h int) []string {
 	lines := []string{dimStyle.Render(shorten(b.dir, w))}
 	var list []string
 	for i, e := range b.entries {
-		mark := "  "
-		if !e.dir && b.marked[filepath.Join(b.dir, e.name)] {
-			mark = okStyle.Render("● ")
-		}
 		name := e.name
 		if e.dir {
 			name = headStyle.Render(name + "/")
+		} else if b.marked[filepath.Join(b.dir, e.name)] {
+			name = okStyle.Render(name)
 		}
-		line := fitLine(mark+name, w)
+		line := fitLine("  "+name, w)
 		if i == b.cursor {
 			line = cursorSty.Render(line)
 		}

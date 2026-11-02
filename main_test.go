@@ -220,3 +220,12 @@ func TestMediaPaths(t *testing.T) {
 		t.Fatalf("mediaPaths() = %v, want %v", paths, want)
 	}
 }
+
+func TestVersionFlags(t *testing.T) {
+	for _, arg := range []string{"-v", "--version", "version"} {
+		code, out, _ := runApp(context.Background(), arg)
+		if code != exitOK || !strings.HasPrefix(out, "mekiki ") {
+			t.Fatalf("%s: code %d, stdout %q", arg, code, out)
+		}
+	}
+}

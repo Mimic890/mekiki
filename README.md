@@ -36,6 +36,7 @@ mekiki <command> [flags] [args]
 | `meta get\|set\|rm <file...>` | Read or edit container, track and image tags |
 | `doctor` | Check external tools, their versions and GPU presets |
 | `tui [dir]` | Open the terminal interface |
+| `version` | Print the version (also `-v`, `--version`) |
 
 `mekiki <path...>` is shorthand for `mekiki info <path...>`. To inspect a file literally named like a command, use `mekiki info ./info`.
 

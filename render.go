@@ -687,7 +687,7 @@ func videoBoxContent(v probe.VideoStream, durationMs int64, image bool) []string
 
 	h := v.HDR
 	if h.IsDolbyVision {
-		dv := anMagenta + anBold + "◆ Dolby Vision" + anReset
+		dv := anMagenta + anBold + "Dolby Vision" + anReset
 		if h.DVProfile > 0 {
 			dv += anMagenta + fmt.Sprintf(" P%d.%d", h.DVProfile, h.DVLevel) + anReset
 		}
@@ -697,7 +697,7 @@ func videoBoxContent(v probe.VideoStream, durationMs int64, image bool) []string
 		parts3 = append(parts3, dv)
 	}
 	if h.IsHDR10 {
-		hdr := anYellow + anBold + "▸ HDR10" + anReset
+		hdr := anYellow + anBold + "HDR10" + anReset
 		if h.MaxCLL > 0 {
 			hdr += anGray + fmt.Sprintf(" MaxCLL %d", h.MaxCLL) + anReset
 		}
@@ -710,10 +710,10 @@ func videoBoxContent(v probe.VideoStream, durationMs int64, image bool) []string
 		parts3 = append(parts3, hdr)
 	}
 	if h.IsHDR10Plus {
-		parts3 = append(parts3, anYellow+anBold+"▸ HDR10+"+anReset+anGray+" dynamic"+anReset)
+		parts3 = append(parts3, anYellow+anBold+"HDR10+"+anReset+anGray+" dynamic"+anReset)
 	}
 	if h.IsHLG {
-		parts3 = append(parts3, anGreen+anBold+"▸ HLG"+anReset+anGray+" Hybrid Log-Gamma"+anReset)
+		parts3 = append(parts3, anGreen+anBold+"HLG"+anReset+anGray+" Hybrid Log-Gamma"+anReset)
 	}
 	if !h.IsHDR10 && !h.IsHDR10Plus && !h.IsHLG && !h.IsDolbyVision {
 		xfr := h.ColorTransfer
@@ -880,9 +880,9 @@ func makeAudioCard(a probe.AudioStream, only bool) trackCard {
 		parts = append(parts, anDim+fmtSize(a.SizeBytes)+anReset)
 	}
 	if a.IsAtmos {
-		parts = append(parts, anMagenta+anBold+"✦ ATMOS"+anReset)
+		parts = append(parts, anMagenta+anBold+"ATMOS"+anReset)
 	} else if a.IsDTSX {
-		parts = append(parts, anMagenta+anBold+"✦ DTS:X"+anReset)
+		parts = append(parts, anMagenta+anBold+"DTS:X"+anReset)
 	}
 	return trackCard{
 		title: fmt.Sprintf("#%d", a.Index),
@@ -934,11 +934,11 @@ func printDoctor(w io.Writer, doc doctorDoc) {
 	for _, st := range doc.Tools {
 		switch {
 		case !st.Found:
-			fmt.Fprintf(w, "  %s✖ %-12s%s %s\n", anRed, st.Name, anReset, safeText(st.Error))
+			fmt.Fprintf(w, "  %s%-12s%s %s\n", anRed, st.Name, anReset, safeText(st.Error))
 		case st.Error != "":
 			fmt.Fprintf(w, "  %s! %-12s%s %s  %s%s%s\n", anYellow, st.Name, anReset, safeText(st.Error), anDim, safeText(st.Path), anReset)
 		default:
-			fmt.Fprintf(w, "  %s✔ %-12s%s %s%-16s%s %s%s%s\n", anGreen, st.Name, anReset, anWhite, safeText(st.Version), anReset, anDim, safeText(st.Path), anReset)
+			fmt.Fprintf(w, "  %s%-12s%s %s%-16s%s %s%s%s\n", anGreen, st.Name, anReset, anWhite, safeText(st.Version), anReset, anDim, safeText(st.Path), anReset)
 		}
 	}
 	if len(doc.GPUPresets) > 0 {
@@ -946,9 +946,9 @@ func printDoctor(w io.Writer, doc doctorDoc) {
 	}
 	for _, g := range doc.GPUPresets {
 		if g.OK {
-			fmt.Fprintf(w, "  %s✔ %-12s%s %s%s%s\n", anGreen, g.Name, anReset, anDim, g.Encoder, anReset)
+			fmt.Fprintf(w, "  %s%-12s%s %s%s%s\n", anGreen, g.Name, anReset, anDim, g.Encoder, anReset)
 		} else {
-			fmt.Fprintf(w, "  %s✖ %-12s%s %s%s%s\n", anDim, g.Name, anReset, anDim, visTrunc(safeText(g.Error), 100), anReset)
+			fmt.Fprintf(w, "  %s%-12s%s %s%s%s\n", anDim, g.Name, anReset, anDim, visTrunc(safeText(g.Error), 100), anReset)
 		}
 	}
 	fmt.Fprintln(w)

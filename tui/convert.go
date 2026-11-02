@@ -380,7 +380,7 @@ func (c *convertPanel) lines(w, h int, m *model) []string {
 		lines = append(lines, line)
 	}
 	if ok {
-		row(0, "Preset", "◂ "+headStyle.Render(p.Name)+" ▸ "+dimStyle.Render(p.Description))
+		row(0, "Preset", headStyle.Render(p.Name)+" "+dimStyle.Render(p.Description))
 	} else {
 		row(0, "Preset", errStyle.Render("none usable; see mekiki doctor"))
 	}
