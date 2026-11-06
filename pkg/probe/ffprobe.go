@@ -58,6 +58,8 @@ type HDRInfo struct {
 	// Mastering display luminance (nits) from HDR SEI metadata
 	MaxLuminance float64 `json:"maxLuminance,omitempty"`
 	MinLuminance float64 `json:"minLuminance,omitempty"`
+	// MasterDisplay is the mastering display in x265's master-display syntax.
+	MasterDisplay string `json:"masterDisplay,omitempty"`
 
 	// Raw colour encoding strings from ffprobe
 	ColorPrimaries string `json:"colorPrimaries,omitempty"`
@@ -86,6 +88,7 @@ type VideoStream struct {
 	HDR           HDRInfo           `json:"hdr"`
 	IsAttachedPic bool              `json:"isAttachedPic"` // true for cover art embedded in audio files
 	Default       bool              `json:"default"`
+	Rotation      int               `json:"rotation,omitempty"` // display rotation in degrees
 	Tags          map[string]string `json:"tags"`
 }
 
@@ -296,6 +299,11 @@ func parseVideoStream(s rawStream, stats bool) VideoStream {
 	}
 	vs.HDR = detectHDR(s)
 	vs.IsAttachedPic = s.Disposition.AttachedPic == 1
+	for _, sd := range s.SideDataList {
+		if sd.SideDataType == "Display Matrix" {
+			vs.Rotation = sd.Rotation
+		}
+	}
 	vs.Default, vs.Tags = s.Disposition.Default == 1, tagsOrEmpty(s.Tags)
 	return vs
 }
@@ -380,9 +388,21 @@ func detectHDR(s rawStream) HDRInfo {
 		h.IsHLG = true
 	}
 
-	// Side-data records carry Dolby Vision config, HDR10+ metadata, and
-	// the mastering display / content light level SEI NALUs.
-	for _, sd := range s.SideDataList {
+	applySideData(&h, s.SideDataList)
+
+	// Some Dolby Vision files signal DV via the codec tag instead of side-data.
+	switch strings.ToLower(s.CodecTagString) {
+	case "dvhe", "dvav", "dvh1", "dva1":
+		h.IsDolbyVision = true
+	}
+
+	return h
+}
+
+// applySideData reads Dolby Vision config, HDR10+ metadata, and the
+// mastering display / content light level records of a stream or frame.
+func applySideData(h *HDRInfo, list []rawSideData) {
+	for _, sd := range list {
 		switch sd.SideDataType {
 		case "DOVI configuration record":
 			h.IsDolbyVision = true
@@ -390,7 +410,7 @@ func detectHDR(s rawStream) HDRInfo {
 			h.DVLevel = sd.DVLevel
 			h.DVCompatibility = dvCompatibility(sd.DVBLCompatID)
 
-		case "HDR Dynamic Metadata SMPTE2094-40":
+		case "HDR Dynamic Metadata SMPTE2094-40", "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)":
 			h.IsHDR10Plus = true
 
 		case "Content light level metadata":
@@ -404,16 +424,53 @@ func detectHDR(s rawStream) HDRInfo {
 			if sd.MinLuminance != "" {
 				h.MinLuminance = parseFraction(sd.MinLuminance)
 			}
+			if sd.RedX != "" {
+				h.MasterDisplay = fmt.Sprintf("G(%d,%d)B(%d,%d)R(%d,%d)WP(%d,%d)L(%d,%d)",
+					chromaUnits(sd.GreenX), chromaUnits(sd.GreenY), chromaUnits(sd.BlueX), chromaUnits(sd.BlueY),
+					chromaUnits(sd.RedX), chromaUnits(sd.RedY), chromaUnits(sd.WhitePointX), chromaUnits(sd.WhitePointY),
+					lumaUnits(sd.MaxLuminance), lumaUnits(sd.MinLuminance))
+			}
 		}
 	}
+}
 
-	// Some Dolby Vision files signal DV via the codec tag instead of side-data.
-	switch strings.ToLower(s.CodecTagString) {
-	case "dvhe", "dvav", "dvh1", "dva1":
-		h.IsDolbyVision = true
+// ReadFrameHDR fills h from the first frame of video stream n. Files muxed
+// without container-level HDR records carry them only in the frames' SEI.
+func ReadFrameHDR(ctx context.Context, path string, n int, h *HDRInfo) error {
+	out, err := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-print_format", "json", "-show_frames",
+		"-select_streams", fmt.Sprintf("v:%d", n), "-read_intervals", "%+#1", "-i", path).Output()
+	if err != nil {
+		return fmt.Errorf("ffprobe failed on %q: %w", filepath.Base(path), err)
 	}
+	var raw struct {
+		Frames []struct {
+			SideDataList []rawSideData `json:"side_data_list"`
+		} `json:"frames"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return fmt.Errorf("parse ffprobe output: %w", err)
+	}
+	if len(raw.Frames) > 0 {
+		applySideData(h, raw.Frames[0].SideDataList)
+	}
+	return nil
+}
 
-	return h
+func chromaUnits(frac string) int64 { return fractionUnits(frac, 50000) }
+func lumaUnits(frac string) int64   { return fractionUnits(frac, 10000) }
+
+// fractionUnits converts a fraction string such as "13250/50000" to whole units of 1/per.
+func fractionUnits(frac string, per float64) int64 {
+	num, den, ok := strings.Cut(frac, "/")
+	n, err1 := strconv.ParseFloat(num, 64)
+	d, err2 := 1.0, error(nil)
+	if ok {
+		d, err2 = strconv.ParseFloat(den, 64)
+	}
+	if err1 != nil || err2 != nil || d == 0 {
+		return 0
+	}
+	return int64(math.Round(n / d * per))
 }
 
 // dvCompatibility converts a Dolby Vision backward-compatibility ID to a label.
@@ -614,6 +671,17 @@ type rawSideData struct {
 	// Mastering display luminance (stored as fraction strings, e.g. "34000/50000")
 	MaxLuminance string `json:"max_luminance"`
 	MinLuminance string `json:"min_luminance"`
+	// Mastering display primaries and white point
+	RedX        string `json:"red_x"`
+	RedY        string `json:"red_y"`
+	GreenX      string `json:"green_x"`
+	GreenY      string `json:"green_y"`
+	BlueX       string `json:"blue_x"`
+	BlueY       string `json:"blue_y"`
+	WhitePointX string `json:"white_point_x"`
+	WhitePointY string `json:"white_point_y"`
+	// Display matrix
+	Rotation int `json:"rotation"`
 }
 
 type rawFormat struct {

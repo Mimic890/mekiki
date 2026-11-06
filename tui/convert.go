@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -129,6 +130,8 @@ func (c *convertPanel) loadPresets(ctx context.Context) tea.Cmd {
 			return presetsMsg{err: err}
 		}
 		presets, _, err := lib.Available(ctx)
+		// Token presets are resolved per file by the mekiki video, photo and music commands.
+		presets = slices.DeleteFunc(presets, func(p convert.Preset) bool { return len(p.Tokens) > 0 })
 		return presetsMsg{lib, presets, err}
 	}
 }

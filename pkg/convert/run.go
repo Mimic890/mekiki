@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -23,11 +25,42 @@ import (
 
 // Job is one input file converted to one output file.
 type Job struct {
-	ID        int    `json:"jobId"`
-	Input     string `json:"input"`
-	Output    string `json:"output"`
-	Preset    Preset `json:"-"`
-	Overwrite bool   `json:"-"`
+	ID          int    `json:"jobId"`
+	Input       string `json:"input"`
+	Output      string `json:"output"`
+	Preset      Preset `json:"-"`
+	Overwrite   bool   `json:"-"`
+	OnlySmaller bool   `json:"-"` // keep the output only if it is smaller than the input
+}
+
+// ErrNotSmaller reports that an OnlySmaller job wrote nothing because the result was not smaller.
+var ErrNotSmaller = errors.New("the result is not smaller, nothing written")
+
+// Exif actions, run with exiftool on the finished output.
+const (
+	ExifCopy  = "copy"
+	ExifStrip = "strip"
+)
+
+// ExifArgs returns the exiftool arguments of a Preset.Exif action, nil when
+// there is none. Paths are made absolute so they can never be mistaken for options.
+// The orientation survives a strip because -noautorotate leaves the pixels unrotated.
+func ExifArgs(action, input, output string) ([]string, error) {
+	if action == "" {
+		return nil, nil
+	}
+	in, err := filepath.Abs(input)
+	if err != nil {
+		return nil, err
+	}
+	out, err := filepath.Abs(output)
+	if err != nil {
+		return nil, err
+	}
+	if action == ExifStrip {
+		return []string{"-q", "-q", "-m", "-overwrite_original", "-all=", "--icc_profile:all", "-TagsFromFile", in, "-Orientation", out}, nil
+	}
+	return []string{"-q", "-q", "-m", "-overwrite_original", "-TagsFromFile", in, "-all:all", "-icc_profile", out}, nil
 }
 
 // Progress is a snapshot of a running ffmpeg job.
@@ -54,12 +87,16 @@ func Run(ctx context.Context, job Job, threads int, onProgress func(Progress)) (
 
 	var durationMs int64
 	var fps float64
+	var cover *probe.VideoStream
 	pctx, cancel := context.WithTimeout(ctx, probe.DefaultTimeout)
 	if info, err := probe.ScanFileContext(pctx, job.Input); err == nil {
 		durationMs = info.DurationMs
-		for _, v := range info.Video {
+		for i, v := range info.Video {
 			if !v.IsAttachedPic && fps == 0 {
 				fps = v.FPS
+			}
+			if v.IsAttachedPic && cover == nil {
+				cover = &info.Video[i]
 			}
 		}
 	}
@@ -86,6 +123,16 @@ func Run(ctx context.Context, job Job, threads int, onProgress func(Progress)) (
 	cmd.WaitDelay = 5 * time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	if job.Preset.CoverTag {
+		if cover == nil {
+			return fmt.Errorf("%s: cover art not found", filepath.Base(job.Input))
+		}
+		tags, err := coverMetadata(ctx, ffmpeg, job.Input, *cover)
+		if err != nil {
+			return err
+		}
+		cmd.Stdin = bytes.NewReader(tags)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -101,7 +148,66 @@ func Run(ctx context.Context, job Job, threads int, onProgress func(Progress)) (
 	if err != nil {
 		return fmt.Errorf("ffmpeg failed on %q: %s", filepath.Base(job.Input), ffmpegError(stderr.String(), err))
 	}
+	if err := runExif(ctx, job, tmp); err != nil {
+		return err
+	}
+	if job.OnlySmaller {
+		before, err := os.Stat(job.Input)
+		if err != nil {
+			return err
+		}
+		after, err := os.Stat(tmp)
+		if err != nil {
+			return err
+		}
+		if after.Size() >= before.Size() {
+			os.Remove(tmp)
+			return ErrNotSmaller
+		}
+	}
 	return fsutil.Commit(tmp, job.Output, job.Overwrite)
+}
+
+// runExif applies the preset's exiftool step to the finished temp file.
+func runExif(ctx context.Context, job Job, tmp string) error {
+	args, err := ExifArgs(job.Preset.Exif, job.Input, tmp)
+	if args == nil || err != nil {
+		return err
+	}
+	exiftool, err := tools.Path("exiftool")
+	if err != nil {
+		return err
+	}
+	if out, err := exec.CommandContext(ctx, exiftool, args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("exiftool failed on %q: %s", filepath.Base(job.Input), strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// coverMetadata returns an ffmetadata document holding the file's cover art as a
+// METADATA_BLOCK_PICTURE comment. Ogg muxers cannot store a picture stream, and
+// a picture is too large for a -metadata argument, so ffmpeg reads this on stdin.
+func coverMetadata(ctx context.Context, ffmpeg, input string, cover probe.VideoStream) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-i", input,
+		"-map", "0:"+strconv.Itoa(cover.Index), "-c", "copy", "-f", "image2pipe", "-")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	data, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("cover art of %q: %s", filepath.Base(input), ffmpegError(stderr.String(), err))
+	}
+	// The FLAC picture block: type, MIME, description, width, height, depth, colors, data.
+	mime := "image/" + strings.Replace(cover.Codec, "mjpeg", "jpeg", 1)
+	block := binary.BigEndian.AppendUint32(nil, 3) // front cover
+	block = binary.BigEndian.AppendUint32(block, uint32(len(mime)))
+	block = append(block, mime...)
+	block = binary.BigEndian.AppendUint32(block, 0)
+	for _, n := range []int{cover.Width, cover.Height, 0, 0, len(data)} {
+		block = binary.BigEndian.AppendUint32(block, uint32(n))
+	}
+	block = append(block, data...)
+	encoded := strings.ReplaceAll(base64.StdEncoding.EncodeToString(block), "=", `\=`)
+	return []byte(";FFMETADATA1\nMETADATA_BLOCK_PICTURE=" + encoded + "\n"), nil
 }
 
 // ffmpegError returns the last lines ffmpeg printed, which hold the actual reason.

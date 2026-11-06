@@ -15,7 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Event reports a job state change. Type is one of start, progress, done, failed, canceled.
+// Event reports a job state change. Type is one of start, progress, done, skipped, failed, canceled.
 type Event struct {
 	JobID    int       `json:"jobId"`
 	Type     string    `json:"type"`
@@ -31,7 +31,21 @@ type Event struct {
 // is given with several inputs. Directory outputs use the preset container as
 // extension, or keep the input extension when the preset has none.
 func Plan(inputs []string, out string, p Preset, overwrite bool) ([]Job, error) {
-	dirOut := len(inputs) > 1 || strings.HasSuffix(out, "/") || strings.HasSuffix(out, string(filepath.Separator))
+	containers := make([]string, len(inputs))
+	for i := range containers {
+		containers[i] = p.Container
+	}
+	jobs, err := PlanContainers(inputs, out, containers, overwrite)
+	for i := range jobs {
+		jobs[i].Preset = p
+	}
+	return jobs, err
+}
+
+// PlanContainers is Plan with one output extension per input, "" keeping the
+// input's. An empty out writes into a converted directory next to each input.
+func PlanContainers(inputs []string, out string, containers []string, overwrite bool) ([]Job, error) {
+	dirOut := out == "" || len(inputs) > 1 || strings.HasSuffix(out, "/") || strings.HasSuffix(out, string(filepath.Separator))
 	if fi, err := os.Stat(out); err == nil && fi.IsDir() {
 		dirOut = true
 	}
@@ -42,10 +56,14 @@ func Plan(inputs []string, out string, p Preset, overwrite bool) ([]Job, error) 
 		if dirOut {
 			ext := filepath.Ext(in)
 			name := strings.TrimSuffix(filepath.Base(in), ext)
-			if p.Container != "" {
-				ext = "." + p.Container
+			if containers[i] != "" {
+				ext = "." + containers[i]
 			}
-			dst = filepath.Join(out, name+ext)
+			dir := out
+			if out == "" {
+				dir = filepath.Join(filepath.Dir(in), "converted")
+			}
+			dst = filepath.Join(dir, name+ext)
 		}
 		abs, err := filepath.Abs(dst)
 		if err != nil {
@@ -55,7 +73,7 @@ func Plan(inputs []string, out string, p Preset, overwrite bool) ([]Job, error) 
 			return nil, fmt.Errorf("%s and %s would both be written to %s", prev, in, dst)
 		}
 		seen[abs] = in
-		jobs = append(jobs, Job{ID: i + 1, Input: in, Output: dst, Preset: p, Overwrite: overwrite})
+		jobs = append(jobs, Job{ID: i + 1, Input: in, Output: dst, Overwrite: overwrite})
 	}
 	return jobs, nil
 }
@@ -218,6 +236,9 @@ func (q *Queue) Run(ctx context.Context, jobs []Job) []error {
 			errs[pick] = err
 			ev := Event{JobID: job.ID, Type: "done", Input: job.Input, Output: job.Output}
 			switch {
+			case errors.Is(err, ErrNotSmaller):
+				errs[pick] = nil
+				ev.Type, ev.Error = "skipped", err.Error()
 			case err != nil && ctx.Err() != nil:
 				ev.Type, ev.Error = "canceled", err.Error()
 			case err != nil:

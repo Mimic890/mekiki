@@ -2,6 +2,7 @@ package convert
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -15,6 +16,9 @@ func BuildArgs(p Preset, input, output string, threads int) ([]string, error) {
 		args = append(args, "-threads", strconv.Itoa(threads)) // decoder threads
 	}
 	args = append(args, "-i", input)
+	if p.CoverTag {
+		args = append(args, "-f", "ffmetadata", "-i", "pipe:0") // fed by Run
+	}
 
 	if len(p.Tracks) == 0 {
 		args = append(args, "-map", "0")
@@ -28,12 +32,17 @@ func BuildArgs(p Preset, input, output string, threads int) ([]string, error) {
 	}
 
 	// Copy everything by default (attachments, cover art, data), then pick encoders per type.
-	// "V" matches video except attached pictures, so cover art is copied, not re-encoded.
+	// shortcut: ffmpeg evaluates "V" on the output stream, so MKV cover art is encoded too; Compose
+	// avoids that with VideoStream, a preset would need the file's streams here to do the same.
 	args = append(args, "-c", "copy")
+	videoSpec := "V"
+	if p.VideoStream != "" {
+		videoSpec = p.VideoStream
+	}
 	for _, c := range []struct {
 		spec  string
 		codec Codec
-	}{{"V", p.Video}, {"a", p.Audio}, {"s", p.Subtitle}} {
+	}{{videoSpec, p.Video}, {"a", p.Audio}, {"s", p.Subtitle}} {
 		ca, err := codecArgs(c.spec, c.codec, threads)
 		if err != nil {
 			return nil, fmt.Errorf("preset %s: %w", p.Name, err)
@@ -42,6 +51,9 @@ func BuildArgs(p Preset, input, output string, threads int) ([]string, error) {
 	}
 	if threads > 0 {
 		args = append(args, "-threads", strconv.Itoa(threads)) // encoder threads
+	}
+	if p.CoverTag {
+		args = append(args, "-map_metadata", "0", "-map_metadata", "1")
 	}
 	args = append(args, p.Args...)
 	return append(args, output), nil
@@ -74,9 +86,13 @@ func codecArgs(spec string, c Codec, threads int) ([]string, error) {
 	// x265 and SVT-AV1 ignore -threads and size their own pools.
 	if threads > 0 {
 		t := strconv.Itoa(threads)
+		i := slices.Index(c.Args, "-x265-params")
 		switch {
-		case c.Codec == "libx265" && !contains(c.Args, "-x265-params"):
+		case c.Codec == "libx265" && i < 0:
 			args = append(args, "-x265-params", "pools="+t)
+		case c.Codec == "libx265" && !strings.Contains(c.Args[i+1], "pools="):
+			c.Args = slices.Clone(c.Args)
+			c.Args[i+1] += ":pools=" + t
 		case c.Codec == "libsvtav1" && !contains(c.Args, "-svtav1-params"):
 			args = append(args, "-svtav1-params", "lp="+t)
 		}
@@ -119,10 +135,18 @@ func qualityArgs(encoder, spec string, q int, noBitrate bool) ([]string, error) 
 // mapArg turns a track selector into an ffmpeg -map value.
 // Selectors: "all", a stream index ("3"), a type ("v", "a", "s", "t") optionally
 // followed by ":N" (Nth stream of that type) or ":all". Whole-type selectors
-// are optional, so files without such tracks still convert.
+// are optional, so files without such tracks still convert. A leading "-" on a
+// type selector removes those tracks from what earlier selectors picked.
 func mapArg(sel string) (string, error) {
 	if sel == "all" {
 		return "0", nil
+	}
+	if rest, ok := strings.CutPrefix(sel, "-"); ok {
+		m, err := mapArg(rest)
+		if err != nil || !strings.Contains(m, ":") || m[2] < 'a' {
+			return "", fmt.Errorf("track selector %q: use -TYPE or -TYPE:N", sel)
+		}
+		return "-" + strings.TrimSuffix(m, "?"), nil
 	}
 	if n, err := strconv.Atoi(sel); err == nil && n >= 0 {
 		return "0:" + sel, nil

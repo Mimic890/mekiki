@@ -108,3 +108,20 @@ func TestParseFFprobeStaleStats(t *testing.T) {
 		t.Fatalf("unexpected bitrate or bit depth: %+v", a)
 	}
 }
+
+func TestSideDataMasterDisplayAndRotation(t *testing.T) {
+	out := []byte(`{"streams":[{"codec_type":"video","codec_name":"hevc","side_data_list":[
+		{"side_data_type":"Display Matrix","rotation":-90},
+		{"side_data_type":"Mastering display metadata","red_x":"34000/50000","red_y":"16000/50000","green_x":"13250/50000","green_y":"34500/50000",
+		 "blue_x":"7500/50000","blue_y":"3000/50000","white_point_x":"15635/50000","white_point_y":"16450/50000","min_luminance":"50/10000","max_luminance":"1000/1"},
+		{"side_data_type":"HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}]}],"format":{}}`)
+	info, err := parseFFprobe("a.mkv", 1, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := info.Video[0]
+	want := "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50)"
+	if v.HDR.MasterDisplay != want || v.Rotation != -90 || !v.HDR.IsHDR10Plus {
+		t.Fatalf("got %q, rotation %d, hdr10+ %v", v.HDR.MasterDisplay, v.Rotation, v.HDR.IsHDR10Plus)
+	}
+}

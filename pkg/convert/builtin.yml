@@ -123,6 +123,12 @@
   video: {codec: mjpeg, crf: 2}
   args: [-frames:v, "1", -update, "1"]
 
+- name: png
+  description: PNG (lossless), first image only
+  extends: jpeg
+  container: png
+  video: {codec: png, crf: null}
+
 - name: webp
   description: WebP (quality 85), first image only
   extends: jpeg

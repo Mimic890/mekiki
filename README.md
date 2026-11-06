@@ -3,7 +3,8 @@
 Terminal media toolkit powered by [FFmpeg](https://ffmpeg.org/).
 
 - **Inspect** codecs, stream sizes, frame rate, HDR metadata, audio and subtitle tracks, language tags and image EXIF data.
-- **Convert** files with built-in or custom presets, including GPU encoders, in a parallel queue.
+- **Change only what you name** with short tokens: `mekiki video film.mkv h265 q21 a:rus=opus -a:eng`. Everything else is kept.
+- **Convert** files with built-in or custom presets and full control over ffmpeg, including GPU encoders, in a parallel queue.
 - **Edit metadata** of containers, tracks and photos with `mkvpropedit`, `exiftool` or an `ffmpeg` remux.
 
 Every command has `--json` output with a versioned schema and documented exit codes, so scripts and agents can drive it.
@@ -31,7 +32,11 @@ mekiki <command> [flags] [args]
 | Command | Purpose |
 | --- | --- |
 | `info [path...]` | Show media information (default command) |
-| `convert <input...> -o <output>` | Convert files with presets and a parallel queue |
+| `shrink <path...>` | Make files smaller, keeping everything else |
+| `video <path...> <tokens>` | Change only what the tokens name |
+| `photo <path...> <tokens>` | The same for photos |
+| `music <path...> <tokens>` | The same for music |
+| `convert <input...> -o <output>` | Convert with full control over ffmpeg settings |
 | `preset <command>` | List, show, save, remove or edit presets |
 | `meta get\|set\|rm <file...>` | Read or edit container, track and image tags |
 | `doctor` | Check external tools, their versions and GPU presets |
@@ -70,7 +75,76 @@ Output covers:
 
 For images, tags come from `exiftool` when it is installed (EXIF, IPTC, XMP, GPS and maker notes; one exiftool process serves the whole run) and from `ffprobe` otherwise.
 
+### video, photo, music
+
+```text
+mekiki video [flags] <file|directory...> <tokens...>
+mekiki photo ./trip webp 2000px q85 -exif
+mekiki music ./album opus 160k
+```
+
+Everything is kept; each token changes one thing. The plan fills in the rest so that nothing is lost: resolution, frame rate, color, HDR, chapters, subtitles and tags stay as they are, and a track is encoded only if a token asks for it.
+
+| Token | Meaning |
+| --- | --- |
+| `h265` (`hevc`), `h264`, `av1` | Video codec |
+| `webp`, `jpeg` (`jpg`), `avif`, `png` | Photo format |
+| `opus`, `aac`, `mp3`, `flac` | Music format |
+| `q21`, `good`, `best` | Quality, in the encoder's own scale; a value out of its range is an error. `good` is the default |
+| `1080p`, `2000px`, `50%` | Size: fit into the 1920x1080 box (either orientation), limit the longest side, or scale. Only a percentage can enlarge |
+| `30fps` | Frame rate |
+| `gpu` | The first GPU preset of that codec that passes a test encode. Never falls back to the CPU |
+| `a:opus`, `a:192k` | Codec or bitrate of all audio tracks (also `ac3`, `eac3`, and `copy` to keep a track) |
+| `a:rus=opus`, `a:rus=192k` | The same for one language; it wins over the all-tracks token |
+| `160k` | Music bitrate, the same as `a:160k` |
+| `-a:eng` | Remove the tracks of a language |
+| `-s` | Remove all subtitles |
+| `-exif` | Remove metadata: global tags (video), all tags and the cover (music), everything but the orientation and ICC profile (photo) |
+
+Tokens are told from files by their form. To convert a file literally named like a token, write `./h265`. An unknown token, two tokens setting the same thing, or a token that does not apply to the verb is an error with a hint; nothing is guessed.
+
+| Flag | Meaning |
+| --- | --- |
+| `-o PATH` | Output file or directory. Default: a `converted` directory next to each input |
+| `--explain` | Print the plan and the final `ffmpeg` and `exiftool` commands, and exit |
+| `--dry-run` | Print the plan and exit |
+| `--save NAME` | Save the tokens as a preset (with `--yes`, replace one); without files it only saves |
+| `--overwrite`, `-j N`, `--fail-fast` | As in `convert` |
+
+**The plan** is printed before the run (to stderr, or stdout with `--explain` and `--dry-run`) as a diff against the source:
+
+```text
+film.mkv  4.2 GB  → converted/film.mkv
+  video  hevc→h265 q21   1920x1080 23.976 10bit HDR10: as is
+  audio  rus ac3 5.1 → opus 5.1 · eng dts → remove
+  subs   rus, eng: as is
+```
+
+What the planner fills in:
+
+- A source above 8 bits keeps its pixel format. HDR10 and HLG metadata go to x265 as explicit parameters, read from the stream or its first frame; other encoders rely on ffmpeg 7+ to pass them on. A GPU encoder may drop mastering display data, and HDR10+ and Dolby Vision layers cannot be re-encoded: the plan warns about each. Dolby Vision without a compatible base layer is refused, since its colors would break.
+- Scaling honors display rotation. Rotated phone videos stay undistorted.
+- A track already in the named codec is copied, unless a bitrate or quality is named too.
+- Music gets the bitrate of the built-in preset of its format, unless named. Tags and the cover are kept; for Ogg outputs the cover is written as a `METADATA_BLOCK_PICTURE` comment.
+- Photos keep all EXIF, XMP and IPTC tags, the ICC profile and the Orientation tag with unrotated pixels. This needs `exiftool`; `photo` exits with code 4 without it.
+
+**Anything that needs a decision stops the whole run** with exit code 2 and nothing written: a codec that does not fit the container (`flac` in `mp4`: use `a:aac` or write to `.mkv`), subtitles the container does not take, an output name that contradicts the format. Warnings, such as `5.1` mixed down for `mp3` or transparency lost in `jpeg`, do not stop the run.
+
+**Presets are tokens too.** `mekiki video h265 q21 a:opus --save myhevc` stores the set; then `mekiki video film.mkv myhevc a:192k` uses it. Manual tokens win over a preset's. Such a preset works only with its own verb, and `convert --preset` rejects it.
+
+Limits: cover art in Matroska outputs becomes a one-frame video track (the plan warns). Only the first video stream is encoded; other video streams are copied. Languages are matched literally against the track's tag. Photos must have a format ffmpeg can read, and `gif` is refused because it may be animated.
+
+### shrink
+
+```text
+mekiki shrink [flags] <file|directory...>
+```
+
+Needs no knowledge at all: video becomes `h265`, photos `webp` and music `opus`, the same plan as the tokens would give, with everything else kept. A result that is not smaller is thrown away and reported as `skipped`, with exit code 0. Files that cannot be converted are skipped with a message. Flags as in `video`, without `--save`.
+
 ### convert
+
+Full control: every encoder option by hand, with the same engine as the commands above.
 
 ```text
 mekiki convert [flags] <input...> -o <output>
@@ -87,7 +161,7 @@ Inputs are files or directories (their media files, non-recursive). With one inp
 | `--vbitrate`, `--abitrate` | Bitrates, e.g. `6M`, `192k` |
 | `--encoder-preset` | Video encoder speed preset, e.g. `slow`, `p5` |
 | `--pix-fmt` | Video pixel format, e.g. `yuv420p10le` |
-| `--track SEL` | Track to keep (repeatable): `all`, stream index `N`, `v`, `a`, `s`, `t`, `TYPE:N`, `TYPE:all`. Default: all tracks |
+| `--track SEL` | Track to keep (repeatable): `all`, stream index `N`, `v`, `a`, `s`, `t`, `TYPE:N`, `TYPE:all`; `-TYPE` or `-TYPE:N` removes tracks picked earlier. Default: all tracks |
 | `--container EXT` | Output extension for directory output |
 | `--load CLASS` | Load class: `cpu-heavy`, `light`, `gpu`, `io` |
 | `--ffmpeg-arg ARG` | Extra raw ffmpeg output argument (repeatable) |
@@ -98,7 +172,7 @@ Inputs are files or directories (their media files, non-recursive). With one inp
 
 Without `--preset`, every track is copied (`-c copy`) and only the given flags change that. `--crf` maps to `-crf` (x264, x265, SVT-AV1, libaom, VP9), `-cq` (NVENC), `-global_quality` (QSV), `-qp` (VAAPI), `-qp_i`/`-qp_p` (AMF), `-quality` (WebP) or `-q` (JPEG, LAME); other encoders reject it.
 
-Video encoders apply to video tracks only; attached pictures (cover art), attachments and other tracks are copied. Global metadata and chapters are kept by ffmpeg's defaults.
+Video encoders apply to video tracks only; attachments and other tracks are copied. Cover art in MP4 and M4A is copied too, but ffmpeg encodes Matroska cover art with the video track unless `--track` drops it (`mekiki video` handles this). Global metadata and chapters are kept by ffmpeg's defaults.
 
 **Safety.** ffmpeg writes to a hidden temp file next to the output (`.name.*.part.ext`), which is renamed into place only after success. An existing output, including the input itself, is replaced only with `--overwrite`. ffmpeg runs without a shell and without stdin. Ctrl+C stops every running job, removes their temp files and exits with 130. Conversions have no timeout.
 
@@ -113,7 +187,7 @@ Video encoders apply to video tracks only; attached pictures (cover art), attach
 
 **Progress.** Text mode writes progress and per-file results to stderr: a live block on a terminal, finished files only otherwise. With `--json`, stdout carries JSON Lines (see below).
 
-Image inputs: ffmpeg reads JPEG, PNG, WebP, TIFF, BMP, GIF, AVIF and HEIC/HEIF. DNG is decoded only partially, and camera RAW formats (CR2, CR3, NEF, ARW, RAF, ORF) are not supported. Image conversion does not carry over EXIF metadata.
+Image inputs: ffmpeg reads JPEG, PNG, WebP, TIFF, BMP, GIF, AVIF and HEIC/HEIF. DNG is decoded only partially, and camera RAW formats (CR2, CR3, NEF, ARW, RAF, ORF) are not supported. `convert` does not carry over EXIF metadata; `mekiki photo` does.
 
 ### preset
 
@@ -134,7 +208,7 @@ Built-in presets (read-only):
 | Video | `h264` (x264 CRF 20, AAC), `hevc` (x265 CRF 22), `av1` (SVT-AV1 CRF 30), `remux` (copy) |
 | Video, GPU | `hevc-nvenc`, `av1-nvenc`, `hevc-qsv`, `av1-qsv`, `hevc-amf`, `av1-amf`, `hevc-vaapi`, `av1-vaapi` |
 | Audio | `opus` (160k), `aac` (256k, M4A), `mp3` (VBR V2), `flac` |
-| Image | `jpeg`, `webp`, `avif` |
+| Image | `jpeg`, `png`, `webp`, `avif` |
 
 Video presets write MKV and copy audio unless noted. Audio presets keep audio tracks only. Image presets keep the first image. VAAPI presets use `/dev/dri/renderD128`.
 
@@ -154,7 +228,7 @@ Both files live in the user config directory (`$XDG_CONFIG_HOME/mekiki/` or `~/.
   video: {codec: libx265, crf: 18, preset: slow, pixFmt: yuv420p10le, args: [-tune, grain]}
   audio: {codec: libopus, bitrate: 192k}
   subtitle: {codec: copy}
-  tracks: [v, a, "s:all"]        # default: all tracks
+  tracks: [v, a, "s:all", -s:0]  # default: all tracks
   inputArgs: [-hwaccel, cuda]    # raw args before -i
   args: [-movflags, +faststart]  # raw output args
 ```
@@ -291,7 +365,7 @@ The stream objects are abbreviated above; the full field list is in [`testdata/i
 }
 ```
 
-`convert --json` prints one event per line. Every line has `schemaVersion`, `jobId`, `type`, `input` and `output`. `type` is `start` (with `threads`), `progress` (with `progress`), `done`, `failed` or `canceled` (with `error`). `percent` and `durationMs` are 0 when the input duration is unknown.
+`convert --json` prints one event per line, as do `video`, `photo`, `music` and `shrink`. Every line has `schemaVersion`, `jobId`, `type`, `input` and `output`. `type` is `start` (with `threads`), `progress` (with `progress`), `done`, `skipped`, `failed` or `canceled` (the last three with `error`). `percent` and `durationMs` are 0 when the input duration is unknown.
 
 ```json
 {"schemaVersion":1,"jobId":1,"type":"start","input":"a.mkv","output":"out/a.mkv","threads":4}
@@ -304,7 +378,7 @@ The stream objects are abbreviated above; the full field list is in [`testdata/i
 
 In `info --json`, image files carry an `exif` object with the same groups, and every track has `default` and `tags`.
 
-`convert --dry-run --json` prints `{"schemaVersion":1,"jobs":[{"jobId","input","output","preset","load","threads","command":["ffmpeg",...]}]}`; see [`testdata/convert-dry-run.golden`](testdata/convert-dry-run.golden). The command shows the final output path; the real run writes to a temp file first.
+`convert --dry-run --json` prints `{"schemaVersion":1,"jobs":[{"jobId","input","output","preset","load","threads","command":["ffmpeg",...]}]}`; see [`testdata/convert-dry-run.golden`](testdata/convert-dry-run.golden). The command shows the final output path; the real run writes to a temp file first. `video`, `photo` and `music` with `--dry-run --json` or `--explain --json` print the same document, where each job also has `plan` (`{"lines":[{"kind","text"}],"warnings":[...]}`) and, for photos, `post` with the exiftool command.
 
 `preset list --json` prints `{"schemaVersion":1,"presets":[...],"unavailable":[{"name","error"}]}`, and `preset show --json` prints `{"schemaVersion":1,"preset":{...}}` with the fields of `presets.yml` plus `source` (`builtin` or `user`); see [`testdata/preset-show.golden`](testdata/preset-show.golden).
 

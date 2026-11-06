@@ -53,7 +53,13 @@ type Preset struct {
 	Tracks      []string `yaml:"tracks,omitempty" json:"tracks,omitempty"`       // track selectors; empty keeps all
 	InputArgs   []string `yaml:"inputArgs,omitempty" json:"inputArgs,omitempty"` // raw args before -i
 	Args        []string `yaml:"args,omitempty" json:"args,omitempty"`           // raw output args
+	Tokens      []string `yaml:"tokens,omitempty" json:"tokens,omitempty"`       // token set for mekiki video, photo and music
 	Source      string   `yaml:"-" json:"source"`                                // "builtin" or "user"
+
+	// Set by Compose per file, never stored.
+	VideoStream string `yaml:"-" json:"-"` // stream specifier of the encoded video; default "V"
+	CoverTag    bool   `yaml:"-" json:"-"` // write cover art as a Vorbis comment, for Ogg outputs
+	Exif        string `yaml:"-" json:"-"` // ExifCopy or ExifStrip: exiftool step on the output
 }
 
 // ErrUnknownPreset is returned for preset names that are not defined.
@@ -108,6 +114,7 @@ type Library struct {
 	builtin map[string]*yaml.Node
 	user    map[string]*yaml.Node
 	order   []string
+	gpu     map[string]*Preset // working GPU preset per codec family, nil when there is none
 }
 
 // LoadLibrary reads the built-in presets and, if it exists, the user file at path.

@@ -195,7 +195,8 @@ func (a *app) presetRemove(args []string) error {
 const presetTemplate = `# mekiki user presets. A preset with a built-in's name overrides it.
 # Fields: name, description, extends, media (video|audio|image), container,
 # load (cpu-heavy|light|gpu|io), video/audio/subtitle {codec, crf, bitrate,
-# preset, pixFmt, args}, tracks, inputArgs, args.
+# preset, pixFmt, args}, tracks, inputArgs, args. A preset with tokens (saved by
+# mekiki video --save) holds only name, media and tokens.
 #
 # - name: my-hevc
 #   extends: hevc

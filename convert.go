@@ -113,6 +113,9 @@ type dryRunJob struct {
 	Load    string   `json:"load"`
 	Threads int      `json:"threads"`
 	Command []string `json:"command"`
+	Post    []string `json:"post,omitempty"` // exiftool step after ffmpeg
+
+	Plan *convert.FilePlan `json:"plan,omitempty"`
 }
 
 func (a *app) convert(ctx context.Context, args []string) error {
@@ -133,11 +136,9 @@ func (a *app) convert(ctx context.Context, args []string) error {
 	if len(paths) == 0 || *out == "" {
 		return usageErr("convert: need at least one input and -o <output>")
 	}
-	jobs := 0
-	if jobsFlag != "auto" {
-		if jobs, err = strconv.Atoi(jobsFlag); err != nil || jobs < 1 {
-			return usageErr("convert: --jobs must be auto or a positive number, got %q", jobsFlag)
-		}
+	jobs, err := parseJobs("convert", jobsFlag)
+	if err != nil {
+		return err
 	}
 
 	lib, err := loadLibrary()
@@ -151,72 +152,128 @@ func (a *app) convert(ctx context.Context, args []string) error {
 		} else if err != nil {
 			return err
 		}
+		if len(p.Tokens) > 0 {
+			return usageErr("convert: preset %s holds tokens; use it with mekiki %s", p.Name, map[string]string{convert.MediaVideo: "video", convert.MediaPhoto: "photo", convert.MediaMusic: "music"}[p.Media])
+		}
 	}
 	pf.apply(&p, p.Media)
 	if err := p.Normalize(); err != nil {
 		return usageErr("convert: %v", err)
 	}
 
-	var inputs []string
-	for _, path := range paths {
-		found, err := expandPath(path)
-		if err != nil {
-			return err
-		}
-		if fi, _ := os.Stat(path); fi.IsDir() {
-			*out = filepath.Clean(*out) + string(filepath.Separator) // a directory input always means a directory output
-		}
-		inputs = append(inputs, found...)
-	}
-	if len(inputs) == 0 {
-		return errors.New("no media files found in the given inputs")
+	inputs, err := expandInputs(paths, out)
+	if err != nil {
+		return err
 	}
 	planned, err := convert.Plan(inputs, *out, p, *overwrite)
 	if err != nil {
 		return usageErr("convert: %v", err)
 	}
-	limitsPath, err := configPath("config.yml")
-	if err != nil {
-		return err
-	}
-	limits, err := convert.LoadLimits(limitsPath)
-	if err != nil {
-		return err
-	}
-	cores := a.cores
-
 	if *dryRun {
+		limits, err := a.limits()
+		if err != nil {
+			return err
+		}
+		return a.printDryRun(planned, nil, jobs, limits, false)
+	}
+	if _, err := tools.Path("ffmpeg"); err != nil {
+		return err
+	}
+	return a.runQueue(ctx, planned, jobs, *failFast)
+}
+
+func parseJobs(verb, value string) (int, error) {
+	if value == "auto" {
+		return 0, nil
+	}
+	jobs, err := strconv.Atoi(value)
+	if err != nil || jobs < 1 {
+		return 0, usageErr("%s: --jobs must be auto or a positive number, got %q", verb, value)
+	}
+	return jobs, nil
+}
+
+// expandInputs lists the media files of paths. A directory input always means a directory output.
+func expandInputs(paths []string, out *string) ([]string, error) {
+	var inputs []string
+	for _, path := range paths {
+		found, err := expandPath(path)
+		if err != nil {
+			return nil, err
+		}
+		if fi, _ := os.Stat(path); fi.IsDir() && *out != "" {
+			*out = filepath.Clean(*out) + string(filepath.Separator)
+		}
+		inputs = append(inputs, found...)
+	}
+	if len(inputs) == 0 {
+		return nil, errors.New("no media files found in the given inputs")
+	}
+	return inputs, nil
+}
+
+func (a *app) limits() (map[string]int, error) {
+	path, err := configPath("config.yml")
+	if err != nil {
+		return nil, err
+	}
+	return convert.LoadLimits(path)
+}
+
+// printDryRun shows the jobs without running them: the plan of each file when
+// there is one, and the final commands when there is none or with explain.
+func (a *app) printDryRun(planned []convert.Job, plans map[int]*convert.FilePlan, jobs int, limits map[string]int, explain bool) error {
+	var doc struct {
+		SchemaVersion int         `json:"schemaVersion"`
+		Jobs          []dryRunJob `json:"jobs"`
+	}
+	doc.SchemaVersion = schemaVersion
+	for _, job := range planned {
+		p := job.Preset
 		limit := jobs
 		if limit == 0 {
 			limit = limits[p.Load]
 		}
-		threads := max(cores/limit, 1)
-		var doc struct {
-			SchemaVersion int         `json:"schemaVersion"`
-			Jobs          []dryRunJob `json:"jobs"`
+		threads := max(a.cores/limit, 1)
+		cmd, err := convert.BuildArgs(p, job.Input, job.Output, threads)
+		if err != nil {
+			return usageErr("convert: %v", err)
 		}
-		doc.SchemaVersion = schemaVersion
-		for _, job := range planned {
-			cmd, err := convert.BuildArgs(p, job.Input, job.Output, threads)
-			if err != nil {
-				return usageErr("convert: %v", err)
-			}
-			cmd = append([]string{"ffmpeg"}, cmd...)
-			doc.Jobs = append(doc.Jobs, dryRunJob{job, p.Name, p.Load, threads, cmd})
-			if !a.json {
-				fmt.Fprintln(a.stdout, shellJoin(cmd))
-			}
+		cmd = append([]string{"ffmpeg"}, cmd...)
+		exif, err := convert.ExifArgs(p.Exif, job.Input, job.Output)
+		if err != nil {
+			return err
 		}
+		if exif != nil {
+			exif = append([]string{"exiftool"}, exif...)
+		}
+		doc.Jobs = append(doc.Jobs, dryRunJob{job, p.Name, p.Load, threads, cmd, exif, plans[job.ID]})
 		if a.json {
-			return a.writeJSON(doc)
+			continue
 		}
-		return nil
+		if plan := plans[job.ID]; plan != nil {
+			printPlan(a.stdout, job, plan)
+		}
+		if plans == nil || explain {
+			fmt.Fprintln(a.stdout, shellJoin(cmd))
+			if exif != nil {
+				fmt.Fprintln(a.stdout, shellJoin(exif))
+			}
+		}
 	}
+	if a.json {
+		return a.writeJSON(doc)
+	}
+	return nil
+}
 
-	if _, err := tools.Path("ffmpeg"); err != nil {
+// runQueue runs the jobs of any command and sums up their results.
+func (a *app) runQueue(ctx context.Context, planned []convert.Job, jobs int, failFast bool) error {
+	limits, err := a.limits()
+	if err != nil {
 		return err
 	}
-	q := &convert.Queue{Limits: limits, Cores: cores, FailFast: *failFast, OnEvent: a.convertEvents(len(planned))}
+	q := &convert.Queue{Limits: limits, Cores: a.cores, FailFast: failFast, OnEvent: a.convertEvents(len(planned))}
 	q.SetJobs(jobs)
 	errs := q.Run(ctx, planned)
 	if ctx.Err() != nil {
@@ -283,6 +340,10 @@ func (v *progressView) handle(ev convert.Event) {
 		delete(v.running, ev.JobID)
 		v.done++
 		fmt.Fprintf(v.w, "  %s%s%s → %s\n", anGreen, name, anReset, safeText(ev.Output))
+	case "skipped":
+		delete(v.running, ev.JobID)
+		v.done++
+		fmt.Fprintf(v.w, "  %s%s: %s%s\n", anGray, name, safeText(ev.Error), anReset)
 	case "failed", "canceled":
 		delete(v.running, ev.JobID)
 		v.failed++

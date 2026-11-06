@@ -63,7 +63,11 @@ const usageText = `Usage: mekiki <command> [flags] [args]
 
 Commands:
   info [path...]             Show media information (default command)
-  convert <in...> -o <out>   Convert files with presets and a parallel queue
+  shrink <path...>           Make files smaller, keeping everything else
+  video <path...> <tokens>   Change only what the tokens name, e.g. h265 q21 a:rus=opus -a:eng
+  photo <path...> <tokens>   The same for photos, e.g. webp 2000px q85 -exif
+  music <path...> <tokens>   The same for music, e.g. opus 160k
+  convert <in...> -o <out>   Convert with full control over ffmpeg settings
   preset <command>           List, show, save, remove or edit presets
   meta get|set|rm <file...>  Read or edit container, track and image tags
   doctor                     Check external tools, versions and GPU presets
@@ -146,6 +150,8 @@ func (a *app) run(ctx context.Context, args []string) error {
 			return a.doctor(ctx, args[1:])
 		case "convert":
 			return a.convert(ctx, args[1:])
+		case "video", "photo", "music", "shrink":
+			return a.verb(ctx, args[0], args[1:])
 		case "preset":
 			return a.preset(ctx, args[1:])
 		case "meta":

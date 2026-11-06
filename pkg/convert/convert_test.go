@@ -87,7 +87,7 @@ func TestBuiltinPresets(t *testing.T) {
 	}
 	want := []string{"h264", "hevc", "av1", "remux",
 		"hevc-nvenc", "av1-nvenc", "hevc-qsv", "av1-qsv", "hevc-amf", "av1-amf", "hevc-vaapi", "av1-vaapi",
-		"opus", "aac", "mp3", "flac", "jpeg", "webp", "avif"}
+		"opus", "aac", "mp3", "flac", "jpeg", "png", "webp", "avif"}
 	if !reflect.DeepEqual(lib.Names(), want) {
 		t.Fatalf("Names() = %v", lib.Names())
 	}
