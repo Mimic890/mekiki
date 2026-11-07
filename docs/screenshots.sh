@@ -12,6 +12,7 @@ work=$(mktemp -d)
 media=$work/home/Media
 tm() { tmux -L mekiki-shots -f /dev/null "$@"; }
 trap 'tm kill-server 2>/dev/null || true; rm -rf "$work"' EXIT
+trap 'exit 130' INT TERM # run the EXIT cleanup on signals too
 
 chrome=${CHROME:-$(command -v chromium || command -v chromium-browser || command -v google-chrome || true)}
 if [ -z "$chrome" ]; then
