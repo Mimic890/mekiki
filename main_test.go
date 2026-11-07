@@ -221,6 +221,48 @@ func TestMediaPaths(t *testing.T) {
 	}
 }
 
+func TestRecursiveInputs(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.mkv", "Album/01.flac", "Album/CD2/02.flac", "converted/a.mkv", ".cache/b.mkv", "out/c.mkv"} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(root, "out")
+	inputs, subdirs, err := expandInputs([]string{root}, &out, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(root, "a.mkv"), filepath.Join(root, "Album/01.flac"), filepath.Join(root, "Album/CD2/02.flac")}
+	if !reflect.DeepEqual(inputs, want) || !reflect.DeepEqual(subdirs, []string{".", "Album", "Album/CD2"}) {
+		t.Fatalf("expandInputs() = %v %v", inputs, subdirs)
+	}
+	jobs, err := convert.PlanContainers(inputs, "", []string{"", "opus", "opus"}, false)
+	if err == nil {
+		err = mirror(jobs, subdirs, out)
+	}
+	if err != nil || jobs[0].Output != filepath.Join(root, "out/a.mkv") || jobs[2].Output != filepath.Join(root, "out/Album/CD2/02.opus") {
+		t.Fatalf("mirror: %+v, %v", jobs, err)
+	}
+
+	same := []convert.Job{{Input: "A/x.mkv", Output: "A/converted/x.mkv"}, {Input: "B/x.mkv", Output: "B/converted/x.mkv"}}
+	if err := mirror(same, []string{".", "."}, "out"); err == nil {
+		t.Fatal("two roots with the same file name were both written to out/x.mkv")
+	}
+	file, out := want[0], "film.mkv"
+	if _, subdirs, err := expandInputs([]string{file}, &out, true); err != nil || subdirs != nil || out != "film.mkv" {
+		t.Fatalf("a file input with -r: %v %q %v", subdirs, out, err)
+	}
+	out = ""
+	if _, subdirs, err := expandInputs([]string{root}, &out, true); err != nil || subdirs != nil {
+		t.Fatalf("-r without -o mirrors: %v %v", subdirs, err)
+	}
+}
+
 func TestVersionFlags(t *testing.T) {
 	for _, arg := range []string{"-v", "--version", "version"} {
 		code, out, _ := runApp(context.Background(), arg)

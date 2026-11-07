@@ -50,6 +50,7 @@ func (a *app) verb(ctx context.Context, verb string, args []string) error {
 	explain := fs.Bool("explain", false, "print the plan and the final commands without running them")
 	dryRun := fs.Bool("dry-run", false, "print the plan without running it")
 	failFast := fs.Bool("fail-fast", false, "stop all jobs after the first failure")
+	recursive := fs.Bool("r", false, "take the subfolders of directory inputs too; -o keeps their tree")
 	jobsFlag := "auto"
 	fs.StringVar(&jobsFlag, "jobs", "auto", "parallel jobs: a number or auto (per load class, see config.yml)")
 	fs.StringVar(&jobsFlag, "j", "auto", "shorthand for --jobs")
@@ -111,7 +112,7 @@ func (a *app) verb(ctx context.Context, verb string, args []string) error {
 		return usageErr("%s: need at least one input file or directory", verb)
 	}
 
-	inputs, err := expandInputs(paths, out)
+	inputs, subdirs, err := expandInputs(paths, out, *recursive)
 	if err != nil {
 		return err
 	}
@@ -121,7 +122,7 @@ func (a *app) verb(ctx context.Context, verb string, args []string) error {
 	if _, err := tools.Path("ffmpeg"); err != nil {
 		return err
 	}
-	planned, plans, err := a.planFiles(ctx, verb, lib, spec, inputs, *out, *overwrite)
+	planned, plans, err := a.planFiles(ctx, verb, lib, spec, inputs, subdirs, *out, *overwrite)
 	if err != nil {
 		return err
 	}
@@ -149,9 +150,10 @@ func (a *app) verb(ctx context.Context, verb string, args []string) error {
 	return a.runQueue(ctx, planned, jobs, *failFast)
 }
 
-// planFiles probes the inputs and composes one job and plan per file. Files that need a decision stop
-// the whole run, since the user can answer them all at once; shrink has nobody to ask, so it skips them.
-func (a *app) planFiles(ctx context.Context, verb string, lib *convert.Library, spec convert.Spec, inputs []string, out string, overwrite bool) ([]convert.Job, map[int]*convert.FilePlan, error) {
+// planFiles probes the inputs and composes one job and plan per file; subdirs is
+// for mirror, see expandInputs. Files that need a decision stop the whole run,
+// since the user can answer them all at once; shrink has nobody to ask, so it skips them.
+func (a *app) planFiles(ctx context.Context, verb string, lib *convert.Library, spec convert.Spec, inputs, subdirs []string, out string, overwrite bool) ([]convert.Job, map[int]*convert.FilePlan, error) {
 	infos := make([]*probe.MediaInfo, len(inputs))
 	specs := make([]convert.Spec, len(inputs))
 	media := make([]string, len(inputs))
@@ -180,7 +182,14 @@ func (a *app) planFiles(ctx context.Context, verb string, lib *convert.Library, 
 		containers[i] = lib.ContainerFor(media[i], specs[i])
 	}
 
-	planned, err := convert.PlanContainers(inputs, out, containers, overwrite)
+	planOut := out
+	if subdirs != nil {
+		planOut = "" // then mirror
+	}
+	planned, err := convert.PlanContainers(inputs, planOut, containers, overwrite)
+	if err == nil && subdirs != nil {
+		err = mirror(planned, subdirs, out)
+	}
 	if err != nil {
 		return nil, nil, usageErr("%s: %v", verb, err)
 	}

@@ -128,6 +128,7 @@ func (a *app) convert(ctx context.Context, args []string) error {
 	failFast := fs.Bool("fail-fast", false, "stop all jobs after the first failure")
 	overwrite := fs.Bool("overwrite", false, "replace existing output files, including the input itself")
 	dryRun := fs.Bool("dry-run", false, "print the ffmpeg commands without running them")
+	recursive := fs.Bool("r", false, "take the subfolders of directory inputs too; -o keeps their tree")
 	pf := addPresetFlags(fs)
 	paths, err := a.parseFlags(fs, args, "convert [flags] <input...> -o <output>")
 	if err != nil {
@@ -161,11 +162,18 @@ func (a *app) convert(ctx context.Context, args []string) error {
 		return usageErr("convert: %v", err)
 	}
 
-	inputs, err := expandInputs(paths, out)
+	inputs, subdirs, err := expandInputs(paths, out, *recursive)
 	if err != nil {
 		return err
 	}
-	planned, err := convert.Plan(inputs, *out, p, *overwrite)
+	planOut := *out
+	if subdirs != nil {
+		planOut = "" // then mirror
+	}
+	planned, err := convert.Plan(inputs, planOut, p, *overwrite)
+	if err == nil && subdirs != nil {
+		err = mirror(planned, subdirs, *out)
+	}
 	if err != nil {
 		return usageErr("convert: %v", err)
 	}
@@ -193,23 +201,82 @@ func parseJobs(verb, value string) (int, error) {
 	return jobs, nil
 }
 
-// expandInputs lists the media files of paths. A directory input always means a directory output.
-func expandInputs(paths []string, out *string) ([]string, error) {
-	var inputs []string
+// expandInputs lists the media files of paths. A directory input always means a
+// directory output. Recursive takes a directory's whole tree; when that meets an
+// output directory, subdirs holds each file's folder relative to its input, for
+// mirror, and is nil otherwise.
+func expandInputs(paths []string, out *string, recursive bool) (inputs, subdirs []string, err error) {
+	tree := false
 	for _, path := range paths {
-		found, err := expandPath(path)
+		fi, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if fi, _ := os.Stat(path); fi.IsDir() && *out != "" {
+		found := []string{path}
+		switch {
+		case !fi.IsDir():
+		case recursive:
+			found, err = walkMedia(path, *out)
+		default:
+			found, err = mediaPaths(path)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if fi.IsDir() && *out != "" {
 			*out = filepath.Clean(*out) + string(filepath.Separator)
+			tree = tree || recursive
+		}
+		for _, file := range found {
+			sub := "."
+			if fi.IsDir() {
+				sub, _ = filepath.Rel(path, filepath.Dir(file))
+			}
+			subdirs = append(subdirs, sub)
 		}
 		inputs = append(inputs, found...)
 	}
 	if len(inputs) == 0 {
-		return nil, errors.New("no media files found in the given inputs")
+		return nil, nil, errors.New("no media files found in the given inputs")
 	}
-	return inputs, nil
+	if !tree {
+		subdirs = nil
+	}
+	return inputs, subdirs, nil
+}
+
+// walkMedia lists the media files in the tree of root. It skips hidden folders,
+// converted folders of earlier runs and the output folder, and does not follow
+// links to folders.
+func walkMedia(root, out string) ([]string, error) {
+	skip, _ := filepath.Abs(out)
+	var paths []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return err
+		}
+		if abs, _ := filepath.Abs(path); path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "converted" || out != "" && abs == skip) {
+			return filepath.SkipDir
+		}
+		found, err := mediaPaths(path)
+		paths = append(paths, found...)
+		return err
+	})
+	return paths, err
+}
+
+// mirror moves outputs planned next to their inputs (with an empty out) under
+// out, each in its folder from subdirs, so a tree keeps its shape.
+func mirror(jobs []convert.Job, subdirs []string, out string) error {
+	seen := map[string]string{}
+	for i := range jobs {
+		jobs[i].Output = filepath.Join(out, subdirs[i], filepath.Base(jobs[i].Output))
+		if prev, ok := seen[jobs[i].Output]; ok {
+			return fmt.Errorf("%s and %s would both be written to %s", prev, jobs[i].Input, jobs[i].Output)
+		}
+		seen[jobs[i].Output] = jobs[i].Input
+	}
+	return nil
 }
 
 func (a *app) limits() (map[string]int, error) {
@@ -310,7 +377,7 @@ func (a *app) convertEvents(total int) func(convert.Event) {
 	if f, ok := a.stderr.(*os.File); ok {
 		live = term.IsTerminal(int(f.Fd()))
 	}
-	v := &progressView{w: a.stderr, live: live, total: total, running: map[int]convert.Event{}}
+	v := &progressView{w: a.stderr, live: live, total: total, running: map[int]convert.Event{}, sizes: map[int]int64{}}
 	return v.handle
 }
 
@@ -322,6 +389,7 @@ type progressView struct {
 	live                bool
 	total, done, failed int
 	running             map[int]convert.Event
+	sizes               map[int]int64 // input size per job, read when it starts
 	drawn               int
 }
 
@@ -335,11 +403,20 @@ func (v *progressView) handle(ev convert.Event) {
 	name := safeText(filepath.Base(ev.Input))
 	switch ev.Type {
 	case "start", "progress":
+		if ev.Type == "start" {
+			if fi, err := os.Stat(ev.Input); err == nil {
+				v.sizes[ev.JobID] = fi.Size() // before an in-place job replaces it
+			}
+		}
 		v.running[ev.JobID] = ev
 	case "done":
 		delete(v.running, ev.JobID)
 		v.done++
-		fmt.Fprintf(v.w, "  %s%s%s → %s\n", anGreen, name, anReset, safeText(ev.Output))
+		sizes := ""
+		if fi, err := os.Stat(ev.Output); err == nil && v.sizes[ev.JobID] > 0 {
+			sizes = fmt.Sprintf("  %s%s → %s%s", anGray, fmtSize(v.sizes[ev.JobID]), fmtSize(fi.Size()), anReset)
+		}
+		fmt.Fprintf(v.w, "  %s%s%s → %s%s\n", anGreen, name, anReset, safeText(ev.Output), sizes)
 	case "skipped":
 		delete(v.running, ev.JobID)
 		v.done++

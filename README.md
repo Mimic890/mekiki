@@ -136,7 +136,7 @@ Tokens are told from files by their form. To convert a file literally named like
 | `--explain` | Print the plan and the final `ffmpeg` and `exiftool` commands, and exit |
 | `--dry-run` | Print the plan and exit |
 | `--save NAME` | Save the tokens as a preset (with `--yes`, replace one); without files it only saves |
-| `--overwrite`, `-j N`, `--fail-fast` | As in `convert` |
+| `--overwrite`, `-j N`, `--fail-fast`, `-r` | As in `convert` |
 
 **The plan** is printed before the run (to stderr, or stdout with `--explain` and `--dry-run`) as a diff against the source:
 
@@ -177,7 +177,7 @@ Full control: every encoder option by hand, with the same engine as the commands
 mekiki convert [flags] <input...> -o <output>
 ```
 
-Inputs are files or directories (their media files, non-recursive). With one input file, `-o` is the output file. With several inputs, a directory input, an existing directory, or a path ending in `/`, `-o` is an output directory: each output is named after its input with the preset's container as extension. The directory is created if needed.
+Inputs are files or directories: their media files, and with `-r` those of every subfolder too, except hidden and `converted` folders and the output directory. `-o` then keeps the tree: `Music/Album/01.flac` becomes `out/Album/01.opus`. With one input file, `-o` is the output file. With several inputs, a directory input, an existing directory, or a path ending in `/`, `-o` is an output directory: each output is named after its input with the preset's container as extension. The directory is created if needed.
 
 | Flag | Meaning |
 | --- | --- |
@@ -195,6 +195,7 @@ Inputs are files or directories (their media files, non-recursive). With one inp
 | `-j N`, `--jobs N` | Parallel jobs: a number or `auto` (default) |
 | `--fail-fast` | Cancel the remaining jobs after the first failure |
 | `--overwrite` | Replace existing outputs, including the input itself |
+| `-r` | Take the subfolders of directory inputs too |
 | `--dry-run` | Print the ffmpeg commands and exit |
 
 Without `--preset`, every track is copied (`-c copy`) and only the given flags change that. `--crf` maps to `-crf` (x264, x265, SVT-AV1, libaom, VP9), `-cq` (NVENC), `-global_quality` (QSV), `-qp` (VAAPI), `-qp_i`/`-qp_p` (AMF), `-quality` (WebP) or `-q` (JPEG, LAME); other encoders reject it.
