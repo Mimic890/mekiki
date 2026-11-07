@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/charmbracelet/x/ansi v0.11.9
-	github.com/mattn/go-runewidth v0.0.30
+	github.com/mattn/go-runewidth v0.0.31
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/term v0.28.0
 )
