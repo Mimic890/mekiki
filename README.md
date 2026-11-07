@@ -1,27 +1,54 @@
 # mekiki
 
-Terminal media toolkit powered by [FFmpeg](https://ffmpeg.org/).
+[![CI](https://github.com/Mimic890/mekiki/actions/workflows/ci.yml/badge.svg)](https://github.com/Mimic890/mekiki/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Mimic890/mekiki.svg)](https://pkg.go.dev/github.com/Mimic890/mekiki)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Terminal media toolkit powered by [FFmpeg](https://ffmpeg.org/). Say what to change; everything else is kept.
+
+![mekiki video converts a film to H.265 with Russian audio in Opus and the English track removed; the result keeps its chapters, title and subtitles](docs/img/video.png)
 
 - **Inspect** codecs, stream sizes, frame rate, HDR metadata, audio and subtitle tracks, language tags and image EXIF data.
 - **Change only what you name** with short tokens: `mekiki video film.mkv h265 q21 a:rus=opus -a:eng`. Everything else is kept.
 - **Convert** files with built-in or custom presets and full control over ffmpeg, including GPU encoders, in a parallel queue.
 - **Edit metadata** of containers, tracks and photos with `mkvpropedit`, `exiftool` or an `ffmpeg` remux.
+- **Embed it**: the same engine is a set of [Go packages](#use-as-a-go-library).
 
 Every command has `--json` output with a versioned schema and documented exit codes, so scripts and agents can drive it.
 
+## Quick start
+
+Three levels of control over one engine. `shrink` and the token commands print a plan before anything runs; `--explain` adds the exact ffmpeg commands.
+
+```sh
+mekiki shrink ./Videos                               # no knowledge needed: smaller files, nothing else changes
+mekiki video film.mkv h265 q21 a:rus=opus -a:eng     # name the changes with tokens
+mekiki convert film.mkv --preset hevc --crf 20 -o out/   # full control over ffmpeg
+```
+
+Without `-o`, results go into a `converted` directory next to each input, and no existing file is replaced without `--overwrite`. Anything that needs a decision stops the run with a hint instead of a guess:
+
+![mekiki suggests h264 or h265 for a mistyped token, refuses FLAC and SRT in MP4 with a fix for each, and plans an album conversion to Opus that keeps tags and cover](docs/img/plan.png)
+
 ## Install
 
-Requirements: Go 1.26+ and [FFmpeg](https://ffmpeg.org/) (`ffprobe`, and `ffmpeg` for `convert` and `meta`). Optional: [MKVToolNix](https://mkvtoolnix.download/) (`mkvpropedit`) for in-place Matroska edits and [ExifTool](https://exiftool.org/) for image metadata. `mekiki doctor` lists what is installed.
+**Binaries** for Linux, macOS and Windows (amd64 and arm64) come with [GitHub releases](https://github.com/Mimic890/mekiki/releases) made by the release workflow, with a `SHA256SUMS` file. Unpack and put `mekiki` on your `PATH`.
+
+**With Go** 1.26 or newer:
 
 ```sh
 go install github.com/Mimic890/mekiki@latest
 ```
 
-Or build the repository locally:
+**FFmpeg** is required (`ffprobe`, and `ffmpeg` for conversions and remuxing). [MKVToolNix](https://mkvtoolnix.download/) (`mkvpropedit`) for in-place Matroska edits and [ExifTool](https://exiftool.org/) for photo metadata (required by `mekiki photo`) are optional. `mekiki doctor` lists what is installed and which GPU encoders work.
 
-```sh
-go build -o mekiki .
-```
+| System | Command |
+| --- | --- |
+| Debian, Ubuntu | `sudo apt install ffmpeg mkvtoolnix libimage-exiftool-perl` |
+| Fedora | `sudo dnf install ffmpeg mkvtoolnix perl-Image-ExifTool` (FFmpeg from RPM Fusion) |
+| Arch | `sudo pacman -S ffmpeg mkvtoolnix-cli perl-image-exiftool` |
+| macOS | `brew install ffmpeg mkvtoolnix exiftool` |
+| Windows | `winget install Gyan.FFmpeg`, optionally `MoritzBunkus.MKVToolNix` and `OliverBetz.ExifTool` |
 
 ## Usage
 
@@ -297,6 +324,8 @@ Checks `ffprobe`, `ffmpeg`, `mkvpropedit` and `exiftool`: whether each is in `PA
 mekiki tui [dir]
 ```
 
+![The terminal interface: a file browser beside the Info tab of a film with two audio languages, two subtitle tracks and chapters](docs/img/tui.png)
+
 Opens a full-screen interface in `dir` (default: the current directory): a file browser on the left and the Info, Tracks, Metadata and Convert tabs on the right. It starts only with this command and needs stdin and stdout to be a terminal; it exits with code 2 otherwise. `--json` is not supported.
 
 | Key | Action |
@@ -399,17 +428,66 @@ On failure with `--json`, stderr receives one JSON line:
 | 4 | `tool_missing` | A required external tool is not installed |
 | 130 | `interrupted` | Stopped by Ctrl+C or SIGTERM |
 
+## Use as a Go library
+
+The CLI is a thin layer over packages that other programs can import. Each package documents itself on [pkg.go.dev](https://pkg.go.dev/github.com/Mimic890/mekiki), with runnable examples.
+
+| Package | What it does |
+| --- | --- |
+| [`pkg/probe`](https://pkg.go.dev/github.com/Mimic890/mekiki/pkg/probe) | Run `ffprobe` and get typed streams: codecs, HDR, languages, rotation, chapters |
+| [`pkg/convert`](https://pkg.go.dev/github.com/Mimic890/mekiki/pkg/convert) | Tokens, presets, the per-file planner, the ffmpeg runner and the parallel queue |
+| [`pkg/meta`](https://pkg.go.dev/github.com/Mimic890/mekiki/pkg/meta) | Read and write container, track and photo tags |
+| [`pkg/tools`](https://pkg.go.dev/github.com/Mimic890/mekiki/pkg/tools) | Find `ffmpeg`, `mkvpropedit` and `exiftool` and report their versions |
+
+The `mekiki video film.mkv h265 q21 a:rus=opus -a:eng` pipeline in code:
+
+```go
+lib, _ := convert.LoadLibrary("") // built-in presets only; pass a path for a presets.yml
+spec, err := lib.ParseSpec(convert.MediaVideo, []string{"h265", "q21", "a:rus=opus", "-a:eng"})
+if err != nil {
+	return err // unknown or conflicting token, with a hint
+}
+info, err := probe.ScanFileContext(ctx, "film.mkv")
+if err != nil {
+	return err
+}
+jobs, err := convert.PlanContainers([]string{"film.mkv"}, "out/",
+	[]string{lib.ContainerFor(convert.MediaVideo, spec)}, false)
+if err != nil {
+	return err
+}
+var plan *convert.FilePlan
+jobs[0].Preset, plan = lib.Compose(ctx, convert.MediaVideo, spec, info, jobs[0].Output)
+if len(plan.Problems) > 0 {
+	return errors.New(strings.Join(plan.Problems, "; ")) // a decision for the user
+}
+return convert.Run(ctx, jobs[0], 0, func(p convert.Progress) { fmt.Printf("\r%.0f%%", p.Percent) })
+```
+
+For batches, `convert.Queue` runs jobs in parallel with per-load-class limits and reports `Event`s. A `Library` serves concurrent `Compose` calls; only `Save` and `Remove` need exclusive access. The packages call the external tools as subprocesses, so they need them installed; nothing links against FFmpeg. The module is below 1.0: exported names may still change between minor versions, and the release notes say when they do.
+
+## Security model
+
+- External tools run without a shell, with explicit argument lists. Input paths reach ffmpeg as files, never as protocol URLs: a file named `pipe:1.mkv` or `concat:a|b` is read as a file.
+- Outputs are written to a hidden temp file next to the target and renamed into place only on success. An existing file, the input included, is replaced only with `--overwrite` or `--in-place`.
+- File names and tags are sanitized before they reach the terminal, so a crafted name cannot inject escape sequences.
+- `presets.yml` is trusted local configuration: its `args` and `inputArgs` go to ffmpeg verbatim. Do not load preset files from untrusted sources.
+
 ## Development
 
 ```sh
-gofmt -w .
+gofmt -l .                 # must print nothing
 go vet ./...
-go test ./...
+go test -race ./...
 go build ./...
 ```
 
-Integration tests generate tiny media files with `ffmpeg -f lavfi` and are skipped when the needed tool is missing. Regenerate golden files with `go test . -update`. Tests point `XDG_CONFIG_HOME` and `HOME` at temp dirs, so they never touch your presets.
+CI also runs [`staticcheck`](https://staticcheck.dev/) and [`govulncheck`](https://go.dev/doc/security/vuln/). Integration tests generate tiny media files with `ffmpeg -f lavfi` and are skipped when the needed tool is missing. Regenerate golden files with `go test . -update`. Tests point `XDG_CONFIG_HOME` and `HOME` at temp dirs, so they never touch your presets.
+
+The screenshots come from real runs on generated media: `docs/screenshots.sh` rebuilds them (it needs tmux, [freeze](https://github.com/charmbracelet/freeze) and Chrome or Chromium).
+
+A release is a pushed `vX.Y.Z` tag: the release workflow builds the binaries and publishes them with notes generated from the commits.
 
 ## License
 
-MIT
+[MIT](LICENSE)

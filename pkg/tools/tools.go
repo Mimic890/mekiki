@@ -33,6 +33,7 @@ var ErrMissing = errors.New("required tool not found")
 // MissingError reports that a required external tool is not installed.
 type MissingError struct{ Name string }
 
+// Error names the tool and how to install it.
 func (e *MissingError) Error() string {
 	msg := e.Name + " not found in PATH"
 	if hint := installHints[e.Name]; hint != "" {
@@ -41,6 +42,7 @@ func (e *MissingError) Error() string {
 	return msg
 }
 
+// Is makes errors.Is(err, ErrMissing) true for every MissingError.
 func (e *MissingError) Is(target error) bool { return target == ErrMissing }
 
 // Path returns the absolute path of a tool or a *MissingError.
