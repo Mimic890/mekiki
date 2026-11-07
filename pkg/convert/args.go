@@ -32,10 +32,13 @@ func BuildArgs(p Preset, input, output string, threads int) ([]string, error) {
 		}
 		args = append(args, "-map", m)
 	}
+	for _, a := range p.attach {
+		args = append(args, "-map", "-0:"+strconv.Itoa(a.index)) // attached again below, never encoded
+	}
 
 	// Copy everything by default (attachments, cover art, data), then pick encoders per type.
-	// shortcut: ffmpeg evaluates "V" on the output stream, so MKV cover art is encoded too; Compose
-	// avoids that with VideoStream, a preset would need the file's streams here to do the same.
+	// shortcut: ffmpeg evaluates "V" on the output stream, so cover art from a Matroska input is
+	// encoded for an MP4 output; Matroska outputs re-attach it instead, Compose uses VideoStream.
 	args = append(args, "-c", "copy")
 	videoSpec := "V"
 	if p.VideoStream != "" {
@@ -58,6 +61,9 @@ func BuildArgs(p Preset, input, output string, threads int) ([]string, error) {
 		args = append(args, "-map_metadata", "0", "-map_metadata", "1")
 	}
 	args = append(args, p.Args...)
+	for _, a := range p.attach {
+		args = append(args, "-attach", localPath(a.path), "-metadata:s:t:m:filename:"+a.name, "mimetype="+a.mime)
+	}
 	return append(args, localPath(output)), nil
 }
 

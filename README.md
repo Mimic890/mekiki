@@ -159,7 +159,7 @@ What the planner fills in:
 
 **Presets are tokens too.** `mekiki video h265 q21 a:opus --save myhevc` stores the set; then `mekiki video film.mkv myhevc a:192k` uses it. Manual tokens win over a preset's. Such a preset works only with its own verb, and `convert --preset` rejects it.
 
-Limits: cover art in Matroska outputs becomes a one-frame video track (the plan warns). Only the first video stream is encoded; other video streams are copied. Languages are matched literally against the track's tag. Photos must have a format ffmpeg can read, and `gif` is refused because it may be animated.
+Cover art stays cover art: Matroska outputs attach the original picture again instead of making it a video track. Limits: only the first video stream is encoded; other video streams are copied. Languages are matched literally against the track's tag. Photos must have a format ffmpeg can read, and `gif` is refused because it may be animated.
 
 ### shrink
 
@@ -199,7 +199,7 @@ Inputs are files or directories (their media files, non-recursive). With one inp
 
 Without `--preset`, every track is copied (`-c copy`) and only the given flags change that. `--crf` maps to `-crf` (x264, x265, SVT-AV1, libaom, VP9), `-cq` (NVENC), `-global_quality` (QSV), `-qp` (VAAPI), `-qp_i`/`-qp_p` (AMF), `-quality` (WebP) or `-q` (JPEG, LAME); other encoders reject it.
 
-Video encoders apply to video tracks only; attachments and other tracks are copied. Cover art in MP4 and M4A is copied too, but ffmpeg encodes Matroska cover art with the video track unless `--track` drops it (`mekiki video` handles this). Global metadata and chapters are kept by ffmpeg's defaults.
+Video encoders apply to video tracks only; attachments and other tracks are copied. Cover art is copied too; a Matroska output keeps it as an attachment. One exception: ffmpeg encodes the cover of a Matroska source going to MP4 with the video track, so drop it with `--track` or use `mekiki video`, which handles it. Global metadata and chapters are kept by ffmpeg's defaults.
 
 **Safety.** ffmpeg writes to a hidden temp file next to the output (`.name.*.part.ext`), which is renamed into place only after success. An existing output, including the input itself, is replaced only with `--overwrite`. ffmpeg runs without a shell and without stdin. Ctrl+C stops every running job, removes their temp files and exits with 130. Conversions have no timeout.
 

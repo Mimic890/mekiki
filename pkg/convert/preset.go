@@ -62,6 +62,8 @@ type Preset struct {
 	VideoStream string `yaml:"-" json:"-"` // stream specifier of the encoded video; default "V"
 	CoverTag    bool   `yaml:"-" json:"-"` // write cover art as a Vorbis comment, for Ogg outputs
 	Exif        string `yaml:"-" json:"-"` // ExifCopy or ExifStrip: exiftool step on the output
+
+	attach []attachment // Matroska cover art to attach again; set by Compose for the plan and by Run
 }
 
 // ErrUnknownPreset is returned for preset names that are not defined.

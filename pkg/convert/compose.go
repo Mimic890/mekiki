@@ -137,10 +137,10 @@ func (l *Library) Compose(ctx context.Context, media string, spec Spec, info *pr
 		c.audio()
 		c.music()
 	}
+	c.p.attach = attachments(info, c.p.Tracks, output)
 	if _, err := BuildArgs(c.p, "in", "out", 0); err != nil {
 		c.problem("%v", err)
 	}
-	c.warnMatroskaCover()
 	c.checkEncoders()
 	if err := c.p.Normalize(); err != nil {
 		c.problem("%v", err)
@@ -172,20 +172,6 @@ func (c *composer) problem(format string, a ...any) {
 	}
 }
 
-// shortcut: the cover keeps its bytes but changes shape; to keep it an attachment, Run would
-// have to extract it to a temp file and add it back with -attach.
-func (c *composer) warnMatroskaCover() {
-	if c.ext != ".mkv" && c.ext != ".mka" || slices.Contains(c.p.Tracks, "-v") {
-		return
-	}
-	for _, v := range c.info.Video {
-		if v.IsAttachedPic {
-			c.warn("ffmpeg writes %s cover art to %s as a one-frame video track, not as an attachment", v.Codec, strings.TrimPrefix(c.ext, "."))
-			return
-		}
-	}
-}
-
 func (c *composer) checkEncoders() {
 	ffmpeg, err := tools.Path("ffmpeg")
 	if err != nil {
@@ -208,6 +194,11 @@ func (c *composer) checkEncoders() {
 
 func (c *composer) video() {
 	k, v := mainVideo(c.info)
+	for _, a := range attachments(c.info, c.p.Tracks, c.ext) {
+		if a.index < v.Index {
+			k-- // cover art attached again leaves the video streams
+		}
+	}
 	w, h := v.Width, v.Height
 	if v.Rotation%180 != 0 { // ffmpeg rotates before filtering
 		w, h = h, w

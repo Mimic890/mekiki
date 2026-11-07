@@ -1,9 +1,11 @@
 package convert
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -294,6 +296,39 @@ func TestFailFastCancelsRemainingJobs(t *testing.T) {
 	if errs[0] == nil || !errors.Is(errs[1], context.Canceled) {
 		t.Fatalf("errs = %v", errs)
 	}
+}
+
+// A Matroska cover stays an attachment with its bytes, and a font stays beside it.
+func TestRunKeepsMatroskaCover(t *testing.T) {
+	dir := t.TempDir()
+	cover := testmedia.Generate(t, "cover.jpg")
+	font := filepath.Join(dir, "font.ttf")
+	os.WriteFile(font, []byte("not really a font"), 0o600)
+	src := testmedia.Generate(t, "src.mkv", "-attach", font, "-metadata:s:t:0", "mimetype=font/ttf",
+		"-attach", cover, "-metadata:s:t:1", "mimetype=image/jpeg")
+
+	for _, preset := range []string{"hevc", "remux"} {
+		out := filepath.Join(dir, preset+".mkv")
+		if err := Run(context.Background(), Job{Input: src, Output: out, Preset: builtin(t, preset)}, 0, nil); err != nil {
+			t.Fatalf("%s: %v", preset, err)
+		}
+		info, err := probe.ScanFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(info.Video) != 2 || !info.Video[1].IsAttachedPic || info.Video[1].Codec != "mjpeg" || tag(info.Video[1].Tags, "filename") != "cover.jpg" {
+			t.Fatalf("%s: cover = %+v", preset, info.Video)
+		}
+		got, err := extractPicture(context.Background(), "ffmpeg", out, info.Video[1].Index)
+		if want, _ := os.ReadFile(cover); err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("%s: cover bytes changed (%v)", preset, err)
+		}
+		fonts, _ := exec.Command("ffprobe", "-v", "error", "-select_streams", "t", "-show_entries", "stream_tags=filename", "-of", "csv=p=0", out).Output()
+		if strings.TrimSpace(string(fonts)) != "font.ttf" {
+			t.Fatalf("%s: attachments = %q", preset, fonts)
+		}
+	}
+	assertNoTempFiles(t, dir)
 }
 
 func TestCancelRemovesTempFile(t *testing.T) {

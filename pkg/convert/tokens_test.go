@@ -123,7 +123,7 @@ func film() *probe.MediaInfo {
 		FilePath: "/media/film.mkv",
 		Video: []probe.VideoStream{
 			{Codec: "hevc", Width: 1920, Height: 1080, FPS: 23.976, PixFmt: "yuv420p", BitDepth: 8},
-			{Codec: "mjpeg", Width: 300, Height: 300, IsAttachedPic: true},
+			{Index: 6, Codec: "mjpeg", Width: 300, Height: 300, IsAttachedPic: true},
 		},
 		Audio: []probe.AudioStream{
 			{Codec: "ac3", Channels: 6, ChannelLayout: "5.1(side)", Language: "rus"},
@@ -186,6 +186,33 @@ func TestComposeConcurrent(t *testing.T) {
 	}
 }
 
+func TestCoverAttachments(t *testing.T) {
+	info := &probe.MediaInfo{Video: []probe.VideoStream{
+		{Index: 0, Codec: "png", IsAttachedPic: true, Tags: map[string]string{"FILENAME": "front.png", "MIMETYPE": "image/png"}},
+		{Index: 1, Codec: "h264"},
+		{Index: 2, Codec: "mjpeg", IsAttachedPic: true, Tags: map[string]string{"filename": "a:b.jpg"}},
+	}}
+	got := attachments(info, nil, "out.mkv")
+	want := []attachment{{0, "front.png", "image/png", "front.png"}, {2, "cover.jpg", "image/jpeg", "cover.jpg"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("attachments = %+v", got)
+	}
+	if attachments(info, nil, "out.mp4") != nil || len(attachments(info, []string{"v:1", "a"}, "out.mkv")) != 0 {
+		t.Fatal("only Matroska outputs attach, and only covers the selectors keep")
+	}
+	for _, test := range []struct {
+		tracks []string
+		want   bool
+	}{
+		{nil, true}, {[]string{"all"}, true}, {[]string{"all", "-v"}, false}, {[]string{"all", "-a:0"}, true},
+		{[]string{"v"}, true}, {[]string{"v:2"}, true}, {[]string{"v:0"}, false}, {[]string{"3"}, true}, {[]string{"a"}, false},
+	} {
+		if got := kept(test.tracks, 3, "v", 2); got != test.want {
+			t.Errorf("kept(%v) = %v", test.tracks, got)
+		}
+	}
+}
+
 func TestComposeVideo(t *testing.T) {
 	p, plan := compose(t, MediaVideo, "h265 q21 a:rus=opus -a:eng", film(), "out/film.mkv")
 	if len(plan.Problems) > 0 {
@@ -199,14 +226,16 @@ func TestComposeVideo(t *testing.T) {
 	if !reflect.DeepEqual(plan.Lines, wantLines) {
 		t.Fatalf("lines = %+v", plan.Lines)
 	}
-	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "cover art") {
+	if len(plan.Warnings) != 0 {
 		t.Fatalf("warnings = %v", plan.Warnings)
 	}
 	args, err := BuildArgs(p, "in.mkv", "out.mkv", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "-i in.mkv -map 0 -map -0:a:1 -c copy -c:v:0 libx265 -crf:v:0 21 -preset:v:0 medium -c:a:0 libopus -filter:a:0 channelmap=channel_layout=5.1 out.mkv"
+	// The cover leaves the mapping and comes back as a Matroska attachment.
+	want := "-i in.mkv -map 0 -map -0:a:1 -map -0:6 -c copy -c:v:0 libx265 -crf:v:0 21 -preset:v:0 medium -c:a:0 libopus -filter:a:0 channelmap=channel_layout=5.1 " +
+		"-attach cover.jpg -metadata:s:t:m:filename:cover.jpg mimetype=image/jpeg out.mkv"
 	if got := strings.Join(args[8:], " "); got != want {
 		t.Fatalf("args:\n got %s\nwant %s", got, want)
 	}
@@ -253,6 +282,17 @@ func TestComposeVideo(t *testing.T) {
 	}
 	if _, plan := compose(t, MediaVideo, "a:aac", info, "film.mkv"); len(plan.Problems) != 0 {
 		t.Fatalf("copying Dolby Vision is fine: %v", plan.Problems)
+	}
+
+	// Cover art before the main video leaves the video streams only where it is attached again.
+	info = film()
+	info.Video[0].Index, info.Video[1].Index = 1, 0
+	info.Video[0], info.Video[1] = info.Video[1], info.Video[0]
+	if p, _ := compose(t, MediaVideo, "h264", info, "film.mkv"); p.VideoStream != "v:0" {
+		t.Fatalf("mkv: %s", p.VideoStream)
+	}
+	if p, _ := compose(t, MediaVideo, "h264", info, "film.mp4"); p.VideoStream != "v:1" {
+		t.Fatalf("mp4: %s", p.VideoStream)
 	}
 }
 

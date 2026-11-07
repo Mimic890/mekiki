@@ -88,6 +88,7 @@ func Run(ctx context.Context, job Job, threads int, onProgress func(Progress)) (
 	var durationMs int64
 	var fps float64
 	var cover *probe.VideoStream
+	job.Preset.attach = nil
 	pctx, cancel := context.WithTimeout(ctx, probe.DefaultTimeout)
 	if info, err := probe.ScanFileContext(pctx, job.Input); err == nil {
 		durationMs = info.DurationMs
@@ -99,8 +100,27 @@ func Run(ctx context.Context, job Job, threads int, onProgress func(Progress)) (
 				cover = &info.Video[i]
 			}
 		}
+		job.Preset.attach = attachments(info, job.Preset.Tracks, job.Output)
 	}
 	cancel()
+	if len(job.Preset.attach) > 0 {
+		dir, err := os.MkdirTemp("", "mekiki-cover-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(dir)
+		for i := range job.Preset.attach {
+			a := &job.Preset.attach[i]
+			data, err := extractPicture(ctx, ffmpeg, job.Input, a.index)
+			if err != nil {
+				return err
+			}
+			a.path = filepath.Join(dir, a.name) // ffmpeg names the attachment after the file
+			if err := os.WriteFile(a.path, data, 0o600); err != nil {
+				return err
+			}
+		}
+	}
 
 	if err := os.MkdirAll(filepath.Dir(job.Output), 0o755); err != nil {
 		return err
@@ -188,13 +208,9 @@ func runExif(ctx context.Context, job Job, tmp string) error {
 // METADATA_BLOCK_PICTURE comment. Ogg muxers cannot store a picture stream, and
 // a picture is too large for a -metadata argument, so ffmpeg reads this on stdin.
 func coverMetadata(ctx context.Context, ffmpeg, input string, cover probe.VideoStream) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-i", localPath(input),
-		"-map", "0:"+strconv.Itoa(cover.Index), "-c", "copy", "-f", "image2pipe", "-")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	data, err := cmd.Output()
+	data, err := extractPicture(ctx, ffmpeg, input, cover.Index)
 	if err != nil {
-		return nil, fmt.Errorf("cover art of %q: %s", filepath.Base(input), ffmpegError(stderr.String(), err))
+		return nil, err
 	}
 	// The FLAC picture block: type, MIME, description, width, height, depth, colors, data.
 	mime := "image/" + strings.Replace(cover.Codec, "mjpeg", "jpeg", 1)
