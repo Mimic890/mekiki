@@ -65,6 +65,12 @@ func TestBuildArgs(t *testing.T) {
 	if _, err := BuildArgs(p, "a", "b", 0); err == nil || !strings.Contains(err.Error(), "libopus") {
 		t.Errorf("crf on libopus: err = %v", err)
 	}
+
+	// File names that look like protocol URLs must stay local files.
+	args, _ := BuildArgs(builtin(t, "remux"), "concat:a.mkv|b.mkv", "pipe:1.mkv", 0)
+	if got := strings.Join(args, " "); !strings.Contains(got, "-i file:concat:a.mkv|b.mkv ") || !strings.HasSuffix(got, " file:pipe:1.mkv") {
+		t.Errorf("protocol-like names: %s", got)
+	}
 }
 
 func TestMapArg(t *testing.T) {
@@ -138,6 +144,19 @@ func TestUserPresets(t *testing.T) {
 	}
 	if err := lib.Remove("small"); err == nil {
 		t.Fatal("removing a preset another one extends must fail")
+	}
+	// Failed changes must leave no trace, or the next Save writes them to disk.
+	if _, err := lib.Get("tiny"); err != nil {
+		t.Fatalf("a failed Remove broke the library: %v", err)
+	}
+	if err := lib.Save(Preset{Name: "Bad Name"}); err == nil {
+		t.Fatal("saving an invalid name must fail")
+	}
+	if err := lib.Save(Preset{Name: "small", Extends: "nope"}); err == nil {
+		t.Fatal("replacing a preset with a broken one must fail")
+	}
+	if err := lib.Save(Preset{Name: "fine", Extends: "h264"}); err != nil {
+		t.Fatal(err)
 	}
 
 	lib, err = LoadLibrary(path)

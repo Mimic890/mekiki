@@ -437,8 +437,12 @@ func applySideData(h *HDRInfo, list []rawSideData) {
 // ReadFrameHDR fills h from the first frame of video stream n. Files muxed
 // without container-level HDR records carry them only in the frames' SEI.
 func ReadFrameHDR(ctx context.Context, path string, n int, h *HDRInfo) error {
+	absPath, err := filepath.Abs(path) // a relative "name:x" would be read as a protocol URL
+	if err != nil {
+		return fmt.Errorf("resolve %q: %w", path, err)
+	}
 	out, err := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-print_format", "json", "-show_frames",
-		"-select_streams", fmt.Sprintf("v:%d", n), "-read_intervals", "%+#1", "-i", path).Output()
+		"-select_streams", fmt.Sprintf("v:%d", n), "-read_intervals", "%+#1", "-i", absPath).Output()
 	if err != nil {
 		return fmt.Errorf("ffprobe failed on %q: %w", filepath.Base(path), err)
 	}

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Mimic890/mekiki/pkg/probe"
@@ -148,6 +149,41 @@ func compose(t *testing.T, media, tokens string, info *probe.MediaInfo, output s
 		t.Fatal(err)
 	}
 	return lib.Compose(context.Background(), media, spec, info, output)
+}
+
+// One Library serves concurrent Compose calls; the gpu token shares a cache. Run with -race.
+func TestComposeConcurrent(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	lib, _ := LoadLibrary("")
+	spec, err := lib.ParseSpec(MediaVideo, []string{"h265", "gpu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, plan := lib.Compose(canceled, MediaVideo, spec, film(), "film.mkv"); len(plan.Problems) != 1 {
+		t.Fatalf("canceled: %v", plan.Problems)
+	}
+	if _, cached := lib.gpu["hevc"]; cached {
+		t.Fatal("a canceled test encode must not be cached")
+	}
+
+	results := make([]string, 8)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Go(func() {
+			p, plan := lib.Compose(context.Background(), MediaVideo, spec, film(), "film.mkv")
+			results[i] = p.Video.Codec + strings.Join(plan.Problems, "; ")
+		})
+	}
+	wg.Wait()
+	for _, r := range results {
+		if r != results[0] {
+			t.Fatalf("results differ: %q", results)
+		}
+	}
 }
 
 func TestComposeVideo(t *testing.T) {

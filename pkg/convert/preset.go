@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 
 	"go.yaml.in/yaml/v3"
 
@@ -108,16 +110,20 @@ func contains(list []string, s string) bool {
 var builtinYAML []byte
 
 // Library holds the built-in presets and the user's presets file.
+// Its methods are safe for concurrent use, except Save and Remove, which must
+// not run at the same time as any other method.
 type Library struct {
 	path    string     // user presets file; "" for built-ins only
 	doc     *yaml.Node // user file document, kept to preserve comments on save
 	builtin map[string]*yaml.Node
 	user    map[string]*yaml.Node
 	order   []string
+	gpuMu   sync.Mutex
 	gpu     map[string]*Preset // working GPU preset per codec family, nil when there is none
 }
 
-// LoadLibrary reads the built-in presets and, if it exists, the user file at path.
+// LoadLibrary reads the built-in presets and, if it exists, the user file at
+// path. An empty path loads the built-in presets only, and Save then fails.
 func LoadLibrary(path string) (*Library, error) {
 	l := &Library{path: path, builtin: map[string]*yaml.Node{}, user: map[string]*yaml.Node{}}
 	doc, err := parsePresets(builtinYAML, l.builtin)
@@ -237,7 +243,8 @@ func (l *Library) resolve(name string, builtinOnly bool, depth int) (Preset, err
 }
 
 // Save adds p to the user file, replacing a user preset with the same name.
-// p is stored as given, so Extends and unset fields stay unresolved.
+// p is stored as given, so Extends and unset fields stay unresolved. A preset
+// that does not resolve, or breaks one that extends it, is not saved.
 func (l *Library) Save(p Preset) error {
 	if l.path == "" {
 		return errors.New("no user presets file")
@@ -249,14 +256,20 @@ func (l *Library) Save(p Preset) error {
 	}
 	seq := l.doc.Content[0]
 	if old := l.user[p.Name]; old != nil {
+		prev := *old
 		*old = *node
-		node = old
+		if err := l.check(); err != nil {
+			*old = prev
+			return err
+		}
 	} else {
 		seq.Content = append(seq.Content, node)
-	}
-	l.user[p.Name] = node
-	if _, err := l.Get(p.Name); err != nil {
-		return err
+		l.user[p.Name] = node
+		if err := l.check(); err != nil {
+			seq.Content = seq.Content[:len(seq.Content)-1]
+			delete(l.user, p.Name)
+			return err
+		}
 	}
 	return l.write()
 }
@@ -271,14 +284,12 @@ func (l *Library) Remove(name string) error {
 		return fmt.Errorf("%w %q", ErrUnknownPreset, name)
 	}
 	seq := l.doc.Content[0]
-	for i, n := range seq.Content {
-		if n == node {
-			seq.Content = append(seq.Content[:i], seq.Content[i+1:]...)
-			break
-		}
-	}
+	kept := slices.DeleteFunc(slices.Clone(seq.Content), func(n *yaml.Node) bool { return n == node })
+	all := seq.Content
+	seq.Content = kept
 	delete(l.user, name)
 	if err := l.check(); err != nil {
+		seq.Content, l.user[name] = all, node
 		return fmt.Errorf("cannot remove %s: %w", name, err)
 	}
 	return l.write()

@@ -167,7 +167,9 @@ func (c *composer) warn(format string, a ...any) {
 	c.plan.Warnings = append(c.plan.Warnings, fmt.Sprintf(format, a...))
 }
 func (c *composer) problem(format string, a ...any) {
-	c.plan.Problems = append(c.plan.Problems, fmt.Sprintf(format, a...))
+	if msg := fmt.Sprintf(format, a...); !slices.Contains(c.plan.Problems, msg) { // two tracks, one decision
+		c.plan.Problems = append(c.plan.Problems, msg)
+	}
 }
 
 // shortcut: the cover keeps its bytes but changes shape; to keep it an attachment, Run would
@@ -330,24 +332,30 @@ func (c *composer) encoderPreset(family string) (Preset, error) {
 	if c.spec["gpu"] == "" {
 		return c.l.Get(family)
 	}
-	if c.l.gpu == nil {
-		c.l.gpu = map[string]*Preset{}
-	}
-	if p, ok := c.l.gpu[family]; ok {
-		if p == nil {
-			return Preset{}, fmt.Errorf("gpu: no GPU preset for %s works on this machine; see mekiki doctor", family)
+	l := c.l
+	l.gpuMu.Lock() // concurrent Compose calls share one test encode per family
+	defer l.gpuMu.Unlock()
+	if _, tested := l.gpu[family]; !tested {
+		var found *Preset
+		for _, name := range l.Names() {
+			p, err := l.Get(name)
+			if err == nil && p.Load == LoadGPU && strings.HasPrefix(name, family+"-") && Verify(c.ctx, p) == nil {
+				found = &p
+				break
+			}
 		}
+		if err := c.ctx.Err(); err != nil {
+			return Preset{}, err // a canceled test encode says nothing about the GPU
+		}
+		if l.gpu == nil {
+			l.gpu = map[string]*Preset{}
+		}
+		l.gpu[family] = found
+	}
+	if p := l.gpu[family]; p != nil {
 		return *p, nil
 	}
-	c.l.gpu[family] = nil
-	for _, name := range c.l.Names() {
-		p, err := c.l.Get(name)
-		if err == nil && p.Load == LoadGPU && strings.HasPrefix(name, family+"-") && Verify(c.ctx, p) == nil {
-			c.l.gpu[family] = &p
-			return p, nil
-		}
-	}
-	return c.encoderPreset(family)
+	return Preset{}, fmt.Errorf("gpu: no GPU preset for %s works on this machine; see mekiki doctor", family)
 }
 
 // quality applies the q slot to a codec and returns its label for the plan.
@@ -479,6 +487,9 @@ func (c *composer) audio() {
 		}
 		languages[lang] = true
 		desc := lang + " " + a.Codec + " " + channels(a)
+		if c.media == MediaMusic && lang == "und" {
+			desc = a.Codec + " " + channels(a) // songs rarely tag a language
+		}
 		named := c.spec["a:"+lang]
 		if strings.HasPrefix(named, "-") {
 			c.p.Tracks = append(c.p.Tracks, "-a:"+strconv.Itoa(i))

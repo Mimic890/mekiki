@@ -188,7 +188,7 @@ func runExif(ctx context.Context, job Job, tmp string) error {
 // METADATA_BLOCK_PICTURE comment. Ogg muxers cannot store a picture stream, and
 // a picture is too large for a -metadata argument, so ffmpeg reads this on stdin.
 func coverMetadata(ctx context.Context, ffmpeg, input string, cover probe.VideoStream) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-i", input,
+	cmd := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-i", localPath(input),
 		"-map", "0:"+strconv.Itoa(cover.Index), "-c", "copy", "-f", "image2pipe", "-")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -272,10 +272,11 @@ func Verify(ctx context.Context, p Preset) error {
 			return fmt.Errorf("encoder %s is not included in this ffmpeg build", c.Codec)
 		}
 	}
-	p.InputArgs = append(append([]string(nil), p.InputArgs...), "-f", "lavfi")
+	p.InputArgs = append(append([]string(nil), p.InputArgs...), "-f", "lavfi", "-t", "0.3")
 	p.Args = append(append([]string(nil), p.Args...), "-f", "null")
 	p.Tracks = nil
-	args, err := BuildArgs(p, "testsrc2=size=256x256:rate=10:duration=0.3", "-", 0)
+	// No ":" in the graph: BuildArgs would take it for a file name like "pipe:1".
+	args, err := BuildArgs(p, "testsrc2=size=256x256", "-", 0)
 	if err != nil {
 		return err
 	}

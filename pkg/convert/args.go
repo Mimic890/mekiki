@@ -2,20 +2,22 @@ package convert
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 )
 
 // BuildArgs returns the ffmpeg arguments (without the program name) that
-// convert input to output with preset p. threads > 0 sets the CPU thread budget.
+// convert input to output with preset p. Both are local file paths, never
+// protocol URLs. threads > 0 sets the CPU thread budget.
 func BuildArgs(p Preset, input, output string, threads int) ([]string, error) {
 	args := []string{"-hide_banner", "-nostdin", "-y", "-v", "error", "-progress", "pipe:1", "-nostats"}
 	args = append(args, p.InputArgs...)
 	if threads > 0 {
 		args = append(args, "-threads", strconv.Itoa(threads)) // decoder threads
 	}
-	args = append(args, "-i", input)
+	args = append(args, "-i", localPath(input))
 	if p.CoverTag {
 		args = append(args, "-f", "ffmetadata", "-i", "pipe:0") // fed by Run
 	}
@@ -56,7 +58,16 @@ func BuildArgs(p Preset, input, output string, threads int) ([]string, error) {
 		args = append(args, "-map_metadata", "0", "-map_metadata", "1")
 	}
 	args = append(args, p.Args...)
-	return append(args, output), nil
+	return append(args, localPath(output)), nil
+}
+
+// localPath keeps ffmpeg from reading a relative file name such as
+// "pipe:1.mkv" or "concat:a.mkv|b.mkv" as a protocol URL.
+func localPath(path string) string {
+	if strings.Contains(path, ":") && !filepath.IsAbs(path) {
+		return "file:" + path
+	}
+	return path
 }
 
 func codecArgs(spec string, c Codec, threads int) ([]string, error) {
