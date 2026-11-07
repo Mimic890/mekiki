@@ -120,8 +120,19 @@ func (b browser) lines(w, h int) []string {
 	return append(lines, window(list, b.cursor, h-1)...)
 }
 
+// tilde writes the home directory as ~.
+func tilde(path string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if rest, ok := strings.CutPrefix(path, home); ok && (rest == "" || rest[0] == filepath.Separator) {
+			return "~" + rest
+		}
+	}
+	return path
+}
+
 // shorten keeps the end of a long path, which holds the useful part.
 func shorten(path string, w int) string {
+	path = tilde(path)
 	if r := []rune(path); len(r) > w && w > 1 {
 		return "…" + string(r[len(r)-w+1:])
 	}

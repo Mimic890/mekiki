@@ -173,3 +173,18 @@ func TestConvertQueueRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestShorten(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for path, want := range map[string]string{
+		home:                                     "~",
+		filepath.Join(home, "Videos"):            "~/Videos",
+		home + "x/Videos":                        "…/Videos", // a sibling that shares the prefix
+		filepath.Join(home, "a", "long", "path"): "…ng/path",
+	} {
+		if got, want := shorten(path, 8), filepath.FromSlash(want); got != want {
+			t.Errorf("shorten(%q) = %q, want %q", path, got, want)
+		}
+	}
+}

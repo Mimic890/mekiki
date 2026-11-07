@@ -191,7 +191,7 @@ func (c *convertPanel) update(msg tea.Msg, m *model) tea.Cmd {
 		if failed > 0 {
 			m.setStatus(fmt.Errorf("%d of %d jobs did not finish", failed, len(c.jobs)), "")
 		} else {
-			m.setStatus(nil, "converted %d files to %s", len(c.jobs), c.outDir)
+			m.setStatus(nil, "converted %d files to %s", len(c.jobs), tilde(c.outDir))
 		}
 		if err := m.browser.load(m.browser.dir); err == nil {
 			return m.loadCurrent() // outputs may land in the listed directory
@@ -394,7 +394,7 @@ func (c *convertPanel) lines(w, h int, m *model) []string {
 		}
 		row(i+1, f.label, value)
 	}
-	row(len(fields)+1, "Output dir", c.outDir)
+	row(len(fields)+1, "Output dir", tilde(c.outDir))
 
 	inputs := len(m.browser.markedPaths())
 	target := fmt.Sprintf("%d marked files", inputs)
