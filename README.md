@@ -50,6 +50,14 @@ go install github.com/Mimic890/mekiki@latest
 | macOS | `brew install ffmpeg mkvtoolnix exiftool` |
 | Windows | `winget install Gyan.FFmpeg`, optionally `MoritzBunkus.MKVToolNix` and `OliverBetz.ExifTool` |
 
+**Tab completion** of commands, flags, tokens and preset names, next to file names:
+
+| Shell | Add to the shell's startup file |
+| --- | --- |
+| bash | `source <(mekiki completion bash)` in `~/.bashrc` |
+| zsh | `source <(mekiki completion zsh)` in `~/.zshrc`, after `compinit` |
+| fish | `mekiki completion fish \| source` in `~/.config/fish/config.fish` |
+
 ## Usage
 
 ```text
@@ -77,7 +85,7 @@ Flags may appear before or after positional arguments; `--` ends flag parsing. `
 ### info
 
 ```text
-mekiki info [--json] [file|directory...]
+mekiki info [--json] [-r] [file|directory...]
 ```
 
 | Invocation | Behavior |
@@ -87,7 +95,7 @@ mekiki info [--json] [file|directory...]
 | `mekiki file.mkv` | Show a detailed view of one file |
 | `mekiki a.mkv b.mp4 ./Music` | Inspect several files and directories |
 
-Directory scans are non-recursive, skip hidden entries and subdirectories, and discover media by file extension. Every file is attempted; failures are reported after the rest are shown (see exit codes).
+Directory scans skip hidden entries and discover media by file extension. They take subdirectories only with `-r`, which skips hidden and `converted` folders. Every file is attempted; failures are reported after the rest are shown (see exit codes).
 
 Each `ffprobe` process has a 30-second timeout. Paths are passed as explicit local inputs, and filenames and metadata are sanitized before terminal output.
 
@@ -272,12 +280,12 @@ jobs:
 ### meta
 
 ```text
-mekiki meta get [--json] <file|directory...>
+mekiki meta get [--json] [-r] <file|directory...>
 mekiki meta set [flags] <file...> KEY=VALUE...
 mekiki meta rm  [flags] <file...> KEY...
 ```
 
-`get` shows container tags, every track with its selector (`v:0`, `a:1`, `s:0`), `default`/`forced` flags and tags, and, for images, MP4 and MOV, all exiftool tags by group (`IFD0`, `ExifIFD`, `GPS`, `XMP-dc`, `IPTC`, maker notes, ...).
+`get` (with `-r`, also for subfolders) shows container tags, every track with its selector (`v:0`, `a:1`, `s:0`), `default`/`forced` flags and tags, and, for images, MP4 and MOV, all exiftool tags by group (`IFD0`, `ExifIFD`, `GPS`, `XMP-dc`, `IPTC`, maker notes, ...).
 
 `set` and `rm` take the files first (arguments that exist on disk), then the tags. They never change an input unless `--in-place` is given; otherwise `-o` names the output file, or a directory for several inputs.
 

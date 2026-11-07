@@ -72,6 +72,7 @@ Commands:
   meta get|set|rm <file...>  Read or edit container, track and image tags
   doctor                     Check external tools, versions and GPU presets
   tui [dir]                  Open the terminal interface (needs a terminal)
+  completion bash|zsh|fish   Print the shell completion script
   version                    Print the version (also -v, --version)
 
 mekiki <path...> is shorthand for mekiki info <path...>.
@@ -90,6 +91,9 @@ type app struct {
 	stdout, stderr io.Writer
 	json           bool
 	cores          int // CPU thread budget for conversions
+
+	onlyFlags bool          // parseFlags only records the flag set, for shell completion
+	flags     *flag.FlagSet // recorded by parseFlags
 }
 
 func main() {
@@ -158,6 +162,13 @@ func (a *app) run(ctx context.Context, args []string) error {
 			return a.meta(ctx, args[1:])
 		case "tui":
 			return a.tui(ctx, args[1:])
+		case "completion":
+			return a.completion(args[1:])
+		case "__complete":
+			for _, c := range a.complete(ctx, args[1:]) {
+				fmt.Fprintln(a.stdout, c)
+			}
+			return nil
 		case "help", "-h", "-help", "--help":
 			fmt.Fprint(a.stdout, usageText)
 			return nil
@@ -194,6 +205,10 @@ func (a *app) tui(ctx context.Context, args []string) error {
 func (a *app) parseFlags(fs *flag.FlagSet, args []string, usage string) ([]string, error) {
 	fs.SetOutput(io.Discard)
 	fs.BoolVar(&a.json, "json", a.json, "print machine-readable JSON to stdout")
+	if a.onlyFlags {
+		a.flags = fs
+		return nil, flag.ErrHelp
+	}
 	var pos []string
 	for {
 		err := fs.Parse(args)
@@ -266,7 +281,8 @@ type itemError struct {
 
 func (a *app) info(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("info", flag.ContinueOnError)
-	args, err := a.parseFlags(fs, args, "info [--json] [file|directory...]")
+	recursive := fs.Bool("r", false, "take the subfolders of directories too")
+	args, err := a.parseFlags(fs, args, "info [--json] [-r] [file|directory...]")
 	if err != nil {
 		return err
 	}
@@ -281,7 +297,7 @@ func (a *app) info(ctx context.Context, args []string) error {
 	doc := infoDoc{SchemaVersion: schemaVersion, Files: []infoFile{}, Errors: []itemError{}}
 	var paths []string
 	for _, arg := range args {
-		found, err := expandPath(arg)
+		found, err := expandPath(arg, *recursive)
 		if err != nil {
 			doc.Errors = append(doc.Errors, itemError{arg, err.Error()})
 			continue
@@ -352,16 +368,19 @@ func (a *app) info(ctx context.Context, args []string) error {
 	return batchErr("inspect", len(doc.Errors), total)
 }
 
-// expandPath returns the file itself, or the media files directly inside a directory.
-func expandPath(path string) ([]string, error) {
+// expandPath returns the file itself, or the media files inside a directory:
+// directly inside, or in its whole tree when recursive (see walkMedia).
+func expandPath(path string, recursive bool) ([]string, error) {
 	fi, err := os.Stat(path)
-	if err != nil {
+	switch {
+	case err != nil:
 		return nil, err
+	case !fi.IsDir():
+		return []string{path}, nil
+	case recursive:
+		return walkMedia(path, "")
 	}
-	if fi.IsDir() {
-		return mediaPaths(path)
-	}
-	return []string{path}, nil
+	return mediaPaths(path)
 }
 
 func mediaPaths(dir string) ([]string, error) {

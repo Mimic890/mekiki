@@ -58,7 +58,8 @@ func startExifTool(ctx context.Context, paths []string, need func(string) bool) 
 
 func (a *app) metaGet(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("meta get", flag.ContinueOnError)
-	args, err := a.parseFlags(fs, args, "meta get [--json] <file|directory...>")
+	recursive := fs.Bool("r", false, "take the subfolders of directories too")
+	args, err := a.parseFlags(fs, args, "meta get [--json] [-r] <file|directory...>")
 	if err != nil {
 		return err
 	}
@@ -70,7 +71,7 @@ func (a *app) metaGet(ctx context.Context, args []string) error {
 	}
 	var paths []string
 	for _, arg := range args {
-		found, err := expandPath(arg)
+		found, err := expandPath(arg, *recursive)
 		if err != nil {
 			return err
 		}
