@@ -64,6 +64,8 @@ type Preset struct {
 	Exif        string `yaml:"-" json:"-"` // ExifCopy or ExifStrip: exiftool step on the output
 
 	attach []attachment // Matroska cover art to attach again; set by Compose for the plan and by Run
+	covers []int        // other cover art, by input index: mapped last and copied; set by Run
+	videos int          // video streams mapped before covers
 }
 
 // ErrUnknownPreset is returned for preset names that are not defined.

@@ -328,6 +328,22 @@ func TestRunKeepsMatroskaCover(t *testing.T) {
 			t.Fatalf("%s: attachments = %q", preset, fonts)
 		}
 	}
+
+	// MP4 keeps the cover as attached picture, copied while the video is encoded.
+	p := builtin(t, "hevc")
+	p.Tracks = []string{"all", "-t"} // MP4 takes no font attachments
+	out := filepath.Join(dir, "hevc.mp4")
+	if err := Run(context.Background(), Job{Input: src, Output: out, Preset: p}, 0, nil); err != nil {
+		t.Fatalf("mp4: %v", err)
+	}
+	info, err := probe.ScanFile(out)
+	if err != nil || len(info.Video) != 2 || info.Video[0].Codec != "hevc" || !info.Video[1].IsAttachedPic {
+		t.Fatalf("mp4: %+v, %v", info, err)
+	}
+	got, err := extractPicture(context.Background(), "ffmpeg", out, info.Video[1].Index)
+	if want, _ := os.ReadFile(cover); err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("mp4: cover bytes changed (%v)", err)
+	}
 	assertNoTempFiles(t, dir)
 }
 

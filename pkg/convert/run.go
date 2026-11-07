@@ -88,7 +88,7 @@ func Run(ctx context.Context, job Job, threads int, onProgress func(Progress)) (
 	var durationMs int64
 	var fps float64
 	var cover *probe.VideoStream
-	job.Preset.attach = nil
+	job.Preset.attach, job.Preset.covers, job.Preset.videos = nil, nil, 0
 	pctx, cancel := context.WithTimeout(ctx, probe.DefaultTimeout)
 	if info, err := probe.ScanFileContext(pctx, job.Input); err == nil {
 		durationMs = info.DurationMs
@@ -101,6 +101,9 @@ func Run(ctx context.Context, job Job, threads int, onProgress func(Progress)) (
 			}
 		}
 		job.Preset.attach = attachments(info, job.Preset.Tracks, job.Output)
+		if v := job.Preset.Video.Codec; job.Preset.attach == nil && job.Preset.VideoStream == "" && v != "" && v != "copy" {
+			job.Preset.covers, job.Preset.videos = lastCovers(info, job.Preset.Tracks) // not Matroska: see BuildArgs
+		}
 	}
 	cancel()
 	if len(job.Preset.attach) > 0 {

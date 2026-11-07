@@ -35,10 +35,14 @@ func BuildArgs(p Preset, input, output string, threads int) ([]string, error) {
 	for _, a := range p.attach {
 		args = append(args, "-map", "-0:"+strconv.Itoa(a.index)) // attached again below, never encoded
 	}
+	for _, i := range p.covers {
+		args = append(args, "-map", "-0:"+strconv.Itoa(i))
+	}
+	for _, i := range p.covers {
+		args = append(args, "-map", "0:"+strconv.Itoa(i)) // last, so -c:v:N below finds them
+	}
 
 	// Copy everything by default (attachments, cover art, data), then pick encoders per type.
-	// shortcut: ffmpeg evaluates "V" on the output stream, so cover art from a Matroska input is
-	// encoded for an MP4 output; Matroska outputs re-attach it instead, Compose uses VideoStream.
 	args = append(args, "-c", "copy")
 	videoSpec := "V"
 	if p.VideoStream != "" {
@@ -53,6 +57,11 @@ func BuildArgs(p Preset, input, output string, threads int) ([]string, error) {
 			return nil, fmt.Errorf("preset %s: %w", p.Name, err)
 		}
 		args = append(args, ca...)
+	}
+	// "V" leaves out cover art only as ffmpeg sees it on the output, which misses a
+	// Matroska cover going to MP4; the last matching -c wins.
+	for n := range p.covers {
+		args = append(args, "-c:v:"+strconv.Itoa(p.videos+n), "copy")
 	}
 	if threads > 0 {
 		args = append(args, "-threads", strconv.Itoa(threads)) // encoder threads

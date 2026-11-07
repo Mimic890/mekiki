@@ -208,7 +208,7 @@ Inputs are files or directories: their media files, and with `-r` those of every
 
 Without `--preset`, every track is copied (`-c copy`) and only the given flags change that. `--crf` maps to `-crf` (x264, x265, SVT-AV1, libaom, VP9), `-cq` (NVENC), `-global_quality` (QSV), `-qp` (VAAPI), `-qp_i`/`-qp_p` (AMF), `-quality` (WebP) or `-q` (JPEG, LAME); other encoders reject it.
 
-Video encoders apply to video tracks only; attachments and other tracks are copied. Cover art is copied too; a Matroska output keeps it as an attachment. One exception: ffmpeg encodes the cover of a Matroska source going to MP4 with the video track, so drop it with `--track` or use `mekiki video`, which handles it. Global metadata and chapters are kept by ffmpeg's defaults.
+Video encoders apply to video tracks only; attachments and other tracks are copied. Cover art is never encoded: other outputs copy it, and a Matroska output keeps it as an attachment. Global metadata and chapters are kept by ffmpeg's defaults.
 
 **Safety.** ffmpeg writes to a hidden temp file next to the output (`.name.*.part.ext`), which is renamed into place only after success. An existing output, including the input itself, is replaced only with `--overwrite`. ffmpeg runs without a shell and without stdin. Ctrl+C stops every running job, removes their temp files and exits with 130. Conversions have no timeout.
 

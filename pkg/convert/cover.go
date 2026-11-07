@@ -66,6 +66,21 @@ func attachments(info *probe.MediaInfo, tracks []string, output string) []attach
 	return list
 }
 
+// lastCovers lists the cover pictures the track selectors keep, by input index,
+// and how many other video streams they keep.
+func lastCovers(info *probe.MediaInfo, tracks []string) (covers []int, videos int) {
+	for i, v := range info.Video {
+		switch {
+		case !kept(tracks, v.Index, "v", i):
+		case v.IsAttachedPic:
+			covers = append(covers, v.Index)
+		default:
+			videos++
+		}
+	}
+	return covers, videos
+}
+
 // kept reports whether track selectors keep a stream, given its index and its
 // position among the streams of its type. No selectors keep everything.
 func kept(tracks []string, index int, typ string, pos int) bool {
