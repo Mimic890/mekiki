@@ -45,9 +45,27 @@ func TestInstallHint(t *testing.T) {
 		{"ffmpeg", "darwin", "apt-get", "install FFmpeg" + readme}, // a manager of another OS does not count
 		{"unknown", "linux", "apt-get", ""},
 	} {
-		got := installHint(tc.tool, tc.goos, func(name string) bool { return name == tc.manager })
+		got := installHint(tc.tool, tc.goos, false, func(name string) bool { return name == tc.manager })
 		if got != tc.want {
 			t.Errorf("%s on %s with %s: %q, want %q", tc.tool, tc.goos, tc.manager, got, tc.want)
+		}
+	}
+}
+
+func TestInstallHintRoot(t *testing.T) {
+	for _, tc := range []struct {
+		goos, manager string
+		root          bool
+		want          string
+	}{
+		{"linux", "apt-get", true, "install FFmpeg: apt install ffmpeg"},
+		{"linux", "apt-get", false, "install FFmpeg: sudo apt install ffmpeg"},
+		{"linux", "pacman", true, "install FFmpeg: pacman -S ffmpeg"},
+		{"windows", "winget", false, "install FFmpeg: winget install Gyan.FFmpeg"}, // Geteuid is -1 there
+	} {
+		got := installHint("ffmpeg", tc.goos, tc.root, func(name string) bool { return name == tc.manager })
+		if got != tc.want {
+			t.Errorf("%s root=%v: %q, want %q", tc.manager, tc.root, got, tc.want)
 		}
 	}
 }

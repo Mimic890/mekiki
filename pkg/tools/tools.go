@@ -5,6 +5,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -34,15 +35,20 @@ var managers = []struct {
 	{"windows", "winget", "winget install", map[string]string{"FFmpeg": "Gyan.FFmpeg", "MKVToolNix": "MoritzBunkus.MKVToolNix", "ExifTool": "OliverBetz.ExifTool"}},
 }
 
-// installHint tells how to install a tool on goos, given which programs exist.
-func installHint(name, goos string, exists func(string) bool) string {
+// installHint tells how to install a tool on goos, given which programs exist
+// and whether the process runs as root, which needs no sudo.
+func installHint(name, goos string, root bool, exists func(string) bool) string {
 	product := products[name]
 	if product == "" {
 		return ""
 	}
 	for _, m := range managers {
 		if m.goos == goos && exists(m.probe) {
-			return "install " + product + ": " + m.command + " " + m.packages[product]
+			command := m.command
+			if root {
+				command = strings.TrimPrefix(command, "sudo ")
+			}
+			return "install " + product + ": " + command + " " + m.packages[product]
 		}
 	}
 	return "install " + product + ", see https://github.com/Mimic890/mekiki#install"
@@ -69,7 +75,7 @@ type MissingError struct{ Name string }
 // Error names the tool and how to install it.
 func (e *MissingError) Error() string {
 	msg := e.Name + " not found in PATH"
-	if hint := installHint(e.Name, runtime.GOOS, inPath); hint != "" {
+	if hint := installHint(e.Name, runtime.GOOS, os.Geteuid() == 0, inPath); hint != "" {
 		msg += "; " + hint
 	}
 	return msg

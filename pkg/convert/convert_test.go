@@ -371,8 +371,9 @@ func TestVerify(t *testing.T) {
 	}
 	p := builtin(t, "h264")
 	p.Video.Codec = "no_such_encoder"
-	if err := Verify(context.Background(), p); err == nil {
-		t.Fatal("unknown encoder must fail verification")
+	err := Verify(context.Background(), p)
+	if !errors.Is(err, ErrNoEncoder) || err.Error() != "encoder no_such_encoder is not included in this ffmpeg build" {
+		t.Fatalf("unknown encoder: %v", err)
 	}
 }
 
