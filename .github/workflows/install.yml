@@ -1,0 +1,33 @@
+name: Install script
+
+on:
+  push:
+    paths: [install.ps1, .github/workflows/install.yml]
+  pull_request:
+    paths: [install.ps1, .github/workflows/install.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install a specific version
+        shell: powershell # Windows PowerShell 5.1, what irm | iex runs in by default
+        env:
+          VERSION: v0.2.1
+        run: |
+          Get-Content -Raw install.ps1 | Invoke-Expression
+          $version = & "$env:LOCALAPPDATA\Programs\mekiki\mekiki.exe" --version
+          if ($version -ne 'mekiki v0.2.1') { throw "got $version" }
+      - name: Run again to update
+        shell: powershell
+        run: |
+          Get-Content -Raw install.ps1 | Invoke-Expression
+          $version = & "$env:LOCALAPPDATA\Programs\mekiki\mekiki.exe" --version
+          if ($version -eq 'mekiki v0.2.1') { throw 'the binary was not updated' }
+          $dir = "$env:LOCALAPPDATA\Programs\mekiki"
+          $count = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -eq $dir }).Count
+          if ($count -ne 1) { throw "PATH has the directory $count times" }
