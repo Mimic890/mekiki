@@ -16,21 +16,18 @@ Terminal media toolkit powered by [FFmpeg](https://ffmpeg.org/). Say what to cha
 
 Every command has `--json` output with a versioned schema and documented exit codes, so scripts and agents can drive it.
 
-## Quick start
-
-Three levels of control over one engine. `shrink` and the token commands print a plan before anything runs; `--explain` adds the exact ffmpeg commands.
-
-```sh
-mekiki shrink ./Videos                               # no knowledge needed: smaller files, nothing else changes
-mekiki video film.mkv h265 q21 a:rus=opus -a:eng     # name the changes with tokens
-mekiki convert film.mkv --preset hevc --crf 20 -o out/   # full control over ffmpeg
-```
-
-Without `-o`, results go into a `converted` directory next to each input, and no existing file is replaced without `--overwrite`. Anything that needs a decision stops the run with a hint instead of a guess:
-
-![mekiki suggests h264 or h265 for a mistyped token, refuses FLAC and SRT in MP4 with a fix for each, and plans an album conversion to Opus that keeps tags and cover](docs/img/plan.png)
-
 ## Install
+
+| System | Command |
+| --- | --- |
+| Linux, macOS | `curl -fsSL https://raw.githubusercontent.com/Mimic890/mekiki/main/install.sh \| sh` |
+| Windows (PowerShell) | `irm https://raw.githubusercontent.com/Mimic890/mekiki/main/install.ps1 \| iex` |
+
+The script downloads the latest release, checks it against `SHA256SUMS` and runs `mekiki doctor` at the end. If FFmpeg or ExifTool is missing, it asks before installing them with apt-get, pacman, Homebrew or winget. Without a terminal it prints the command and installs nothing. On Fedora it prints the commands, because FFmpeg comes from RPM Fusion and the script does not enable that repository.
+
+Linux and macOS install to `/usr/local/bin`, using `sudo` only if that directory is not writable. Windows installs to `%LOCALAPPDATA%\Programs\mekiki`, needs no administrator rights and adds that folder to your user `PATH`, so open a new terminal afterwards. Run the script again to update. Set `VERSION=v0.2.2` (`$env:VERSION = 'v0.2.2'` in PowerShell) to install a specific release.
+
+### Manual install
 
 **Binaries** for Linux, macOS and Windows (amd64 and arm64) come with [GitHub releases](https://github.com/Mimic890/mekiki/releases) made by the release workflow, with a `SHA256SUMS` file. Unpack and put `mekiki` on your `PATH`.
 
@@ -40,7 +37,7 @@ Without `-o`, results go into a `converted` directory next to each input, and no
 go install github.com/Mimic890/mekiki@latest
 ```
 
-**FFmpeg** is required (`ffprobe`, and `ffmpeg` for conversions and remuxing). [MKVToolNix](https://mkvtoolnix.download/) (`mkvpropedit`) for in-place Matroska edits and [ExifTool](https://exiftool.org/) for photo metadata (required by `mekiki photo`) are optional. `mekiki doctor` lists what is installed and which GPU encoders work.
+**FFmpeg** is required (`ffprobe`, and `ffmpeg` for conversions and remuxing). [ExifTool](https://exiftool.org/) is required by `mekiki photo` and adds photo metadata elsewhere. [MKVToolNix](https://mkvtoolnix.download/) (`mkvpropedit`) is optional, for in-place Matroska edits. `mekiki doctor` lists what is installed and which GPU encoders work.
 
 | System | Command |
 | --- | --- |
@@ -57,6 +54,20 @@ go install github.com/Mimic890/mekiki@latest
 | bash | `source <(mekiki completion bash)` in `~/.bashrc` |
 | zsh | `source <(mekiki completion zsh)` in `~/.zshrc`, after `compinit` |
 | fish | `mekiki completion fish \| source` in `~/.config/fish/config.fish` |
+
+## Quick start
+
+Three levels of control over one engine. `shrink` and the token commands print a plan before anything runs; `--explain` adds the exact ffmpeg commands.
+
+```sh
+mekiki shrink ./Videos                               # no knowledge needed: smaller files, nothing else changes
+mekiki video film.mkv h265 q21 a:rus=opus -a:eng     # name the changes with tokens
+mekiki convert film.mkv --preset hevc --crf 20 -o out/   # full control over ffmpeg
+```
+
+Without `-o`, results go into a `converted` directory next to each input, and no existing file is replaced without `--overwrite`. Anything that needs a decision stops the run with a hint instead of a guess:
+
+![mekiki suggests h264 or h265 for a mistyped token, refuses FLAC and SRT in MP4 with a fix for each, and plans an album conversion to Opus that keeps tags and cover](docs/img/plan.png)
 
 ## Usage
 
@@ -394,7 +405,7 @@ The stream objects are abbreviated above; the full field list is in [`testdata/i
   "schemaVersion": 1,
   "tools": [
     { "name": "ffprobe", "found": true, "path": "/usr/bin/ffprobe", "version": "7.1" },
-    { "name": "mkvpropedit", "found": false, "error": "mkvpropedit not found in PATH; install MKVToolNix" }
+    { "name": "mkvpropedit", "found": false, "error": "mkvpropedit not found in PATH; install MKVToolNix: sudo apt install mkvtoolnix" }
   ],
   "gpuPresets": [
     { "name": "hevc-nvenc", "encoder": "hevc_nvenc", "ok": true },
@@ -423,7 +434,7 @@ In `info --json`, image files carry an `exif` object with the same groups, and e
 On failure with `--json`, stderr receives one JSON line:
 
 ```json
-{"schemaVersion":1,"error":{"code":"tool_missing","message":"ffprobe not found in PATH; install FFmpeg"}}
+{"schemaVersion":1,"error":{"code":"tool_missing","message":"ffprobe not found in PATH; install FFmpeg: sudo apt install ffmpeg"}}
 ```
 
 ## Exit codes
