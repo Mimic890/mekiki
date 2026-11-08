@@ -66,3 +66,34 @@ func TestFramelessWriter(t *testing.T) {
 		t.Fatalf("framelessWriter = %q, want %q", got, want)
 	}
 }
+
+func TestPrintDoctorGPU(t *testing.T) {
+	const opening = "[vost#0:0/hevc_nvenc @ 0x1] Error while opening encoder"
+	const notBuilt = "encoder hevc_amf is not included in this ffmpeg build"
+	doc := doctorDoc{GPUPresets: []gpuStatus{
+		{Name: "hevc-vaapi", Encoder: "hevc_vaapi", OK: true},
+		{Name: "hevc-nvenc", Encoder: "hevc_nvenc", Error: opening},
+		{Name: "hevc-amf", Encoder: "hevc_amf", Error: notBuilt, notBuilt: true},
+	}}
+
+	var short strings.Builder
+	printDoctor(&short, doc, false)
+	for _, want := range []string{" ok\n", "not available", "not in this ffmpeg build"} {
+		if !strings.Contains(short.String(), want) {
+			t.Errorf("short output has no %q:\n%s", want, short.String())
+		}
+	}
+	for _, not := range []string{"hevc_vaapi", opening, notBuilt} {
+		if strings.Contains(short.String(), not) {
+			t.Errorf("short output has %q:\n%s", not, short.String())
+		}
+	}
+
+	var verbose strings.Builder
+	printDoctor(&verbose, doc, true)
+	for _, want := range []string{"not available  " + opening, "not in this ffmpeg build  " + notBuilt} {
+		if !strings.Contains(verbose.String(), want) {
+			t.Errorf("-v output has no %q:\n%s", want, verbose.String())
+		}
+	}
+}

@@ -275,6 +275,9 @@ func readProgress(r io.Reader, durationMs int64, fps float64, fn func(Progress))
 	}
 }
 
+// ErrNoEncoder reports that ffmpeg was built without an encoder a preset needs.
+var ErrNoEncoder = errors.New("is not included in this ffmpeg build")
+
 // Verify runs a short test encode with p to prove its encoders work on this
 // machine; a listed encoder may still lack the hardware or driver behind it.
 func Verify(ctx context.Context, p Preset) error {
@@ -288,7 +291,7 @@ func Verify(ctx context.Context, p Preset) error {
 	}
 	for _, c := range []Codec{p.Video, p.Audio, p.Subtitle} {
 		if !isCopy(c) && !available[c.Codec] {
-			return fmt.Errorf("encoder %s is not included in this ffmpeg build", c.Codec)
+			return fmt.Errorf("encoder %s %w", c.Codec, ErrNoEncoder)
 		}
 	}
 	p.InputArgs = append(append([]string(nil), p.InputArgs...), "-f", "lavfi", "-t", "0.3")

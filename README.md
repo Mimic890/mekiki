@@ -333,10 +333,10 @@ ffmpeg and exiftool write a temp file next to the target and rename it only on s
 ### doctor
 
 ```text
-mekiki doctor [--json]
+mekiki doctor [--json] [-v]
 ```
 
-Checks `ffprobe`, `ffmpeg`, `mkvpropedit` and `exiftool`: whether each is in `PATH` and which version it reports. It also test-encodes a short clip with every GPU preset, since an encoder listed by ffmpeg may still lack the hardware or driver. Exits with code 4 if `ffprobe` or `ffmpeg` is missing; the optional `mkvpropedit` and `exiftool` and the GPU results do not affect the exit code. Commands that do not need a missing tool keep working.
+Checks `ffprobe`, `ffmpeg`, `mkvpropedit` and `exiftool`: whether each is in `PATH` and which version it reports. It also test-encodes a short clip with every GPU preset, since an encoder listed by ffmpeg may still lack the hardware or driver. Each preset shows `ok`, `not available` (the test encode failed) or `not in this ffmpeg build`; `-v` adds ffmpeg's full error, which `--json` always includes. Exits with code 4 if `ffprobe` or `ffmpeg` is missing; the optional `mkvpropedit` and `exiftool` and the GPU results do not affect the exit code. Commands that do not need a missing tool keep working.
 
 ### tui
 

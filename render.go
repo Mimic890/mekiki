@@ -929,7 +929,7 @@ func makeSubCard(s probe.SubStream) trackCard {
 
 // ── Doctor ────────────────────────────────────────────────────────────────────
 
-func printDoctor(w io.Writer, doc doctorDoc) {
+func printDoctor(w io.Writer, doc doctorDoc, verbose bool) {
 	fmt.Fprintln(w)
 	for _, st := range doc.Tools {
 		switch {
@@ -946,10 +946,17 @@ func printDoctor(w io.Writer, doc doctorDoc) {
 	}
 	for _, g := range doc.GPUPresets {
 		if g.OK {
-			fmt.Fprintf(w, "  %s%-12s%s %s%s%s\n", anGreen, g.Name, anReset, anDim, g.Encoder, anReset)
-		} else {
-			fmt.Fprintf(w, "  %s%-12s%s %s%s%s\n", anDim, g.Name, anReset, anDim, visTrunc(safeText(g.Error), 100), anReset)
+			fmt.Fprintf(w, "  %s%-12s%s ok\n", anGreen, g.Name, anReset)
+			continue
 		}
+		status := "not available"
+		if g.notBuilt {
+			status = "not in this ffmpeg build"
+		}
+		if verbose {
+			status += "  " + safeText(g.Error)
+		}
+		fmt.Fprintf(w, "  %s%-12s%s %s%s%s\n", anDim, g.Name, anReset, anDim, status, anReset)
 	}
 	fmt.Fprintln(w)
 }

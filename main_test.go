@@ -70,6 +70,10 @@ func TestExitCodes(t *testing.T) {
 		t.Errorf("extra arg: code %d, want %d", code, exitUsage)
 	}
 
+	if code, _, errOut := runApp(ctx, "doctor", "-v", "extra"); code != exitUsage || !strings.Contains(errOut, "unexpected argument") {
+		t.Errorf("doctor -v extra: code %d, stderr %q", code, errOut)
+	}
+
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	if code, _, _ := runApp(canceled, "doctor"); code != exitInterrupted {
