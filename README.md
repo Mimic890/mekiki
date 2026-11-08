@@ -20,8 +20,7 @@ Every command has `--json` output with a versioned schema and documented exit co
 
 | System | Command |
 | --- | --- |
-| Linux | `curl -fsSL https://raw.githubusercontent.com/Mimic890/mekiki/main/install.sh \| sh` |
-| macOS | `curl -fsSL https://raw.githubusercontent.com/Mimic890/mekiki/main/install.sh \| sh` |
+| Linux, macOS | `curl -fsSL https://raw.githubusercontent.com/Mimic890/mekiki/main/install.sh \| sh` |
 | Windows (PowerShell) | `irm https://raw.githubusercontent.com/Mimic890/mekiki/main/install.ps1 \| iex` |
 
 The script downloads the latest release, checks it against `SHA256SUMS` and runs `mekiki doctor` at the end. If FFmpeg or ExifTool is missing, it asks before installing them with apt-get, pacman, Homebrew or winget. Without a terminal it prints the command and installs nothing. On Fedora it prints the commands, because FFmpeg comes from RPM Fusion and the script does not enable that repository.
