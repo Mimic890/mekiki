@@ -2,14 +2,47 @@ name: Install script
 
 on:
   push:
-    paths: [install.ps1, .github/workflows/install.yml]
+    paths: [install.sh, install.ps1, .github/workflows/install.yml]
   pull_request:
-    paths: [install.ps1, .github/workflows/install.yml]
+    paths: [install.sh, install.ps1, .github/workflows/install.yml]
 
 permissions:
   contents: read
 
 jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Refuse a corrupted archive
+        run: |
+          mkdir shim
+          # install.sh calls: curl -fsSL --retry 3 -o FILE URL
+          printf '%s\n' '#!/bin/sh' '/usr/bin/curl "$@" || exit' 'case "$6" in *.tar.gz) echo x >>"$5" ;; esac' >shim/curl
+          chmod +x shim/curl
+          if out=$(PATH=$PWD/shim:$PATH sh install.sh </dev/null 2>&1); then
+            echo "$out"; echo 'install.sh accepted a corrupted archive'; exit 1
+          fi
+          echo "$out"
+          grep -q 'checksum mismatch' <<<"$out"
+          test ! -e /usr/local/bin/mekiki
+      - name: Install a specific version
+        run: |
+          out=$(VERSION=v0.2.1 sh install.sh </dev/null 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          grep -q 'Checksum OK' <<<"$out"
+          grep -q ffprobe <<<"$out" # the mekiki doctor report
+          test "$(/usr/local/bin/mekiki --version)" = 'mekiki v0.2.1'
+      - name: Run again to update
+        run: |
+          out=$(sh install.sh </dev/null 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          grep -q 'Checksum OK' <<<"$out"
+          grep -q ffprobe <<<"$out" # the mekiki doctor report
+          version=$(/usr/local/bin/mekiki --version)
+          echo "$version"
+          test "$version" != 'mekiki v0.2.1'
+
   windows:
     runs-on: windows-latest
     steps:
